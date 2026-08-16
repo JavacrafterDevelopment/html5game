@@ -15,7 +15,7 @@ import { RemotePlayer } from '../player/RemotePlayer.js';
 import { RagdollManager } from '../player/Ragdoll.js';
 import { createSoldier } from '../characters/Soldier.js';
 import { Animator } from '../characters/Animator.js';
-import { createWeaponModel } from '../weapons/WeaponModels.js';
+import { createWeaponModel, preloadWeaponModels } from '../weapons/WeaponModels.js';
 import { ViewModel } from '../weapons/ViewModel.js';
 import { WeaponController } from '../weapons/WeaponController.js';
 import { Scope } from '../weapons/Scope.js';
@@ -78,6 +78,7 @@ export class Game {
     await this.map.build((f, label) => onProgress?.(0.05 + f * 0.8, label));
 
     onProgress?.(0.88, 'Assembling weapons');
+    await preloadWeaponModels();
     this.player = new LocalPlayer(this.camera);
     this.player.sensitivity = MOVE.MOUSE_SENS * this.settings.get('sensitivity');
 
@@ -93,6 +94,8 @@ export class Game {
 
     this.effects = new Effects(this.scene);
     this.blood = new BloodSystem(this.scene);
+    this.effects.setViewport(this.renderer.domElement.height);
+    this.blood.setViewport(this.renderer.domElement.height);
     this.ragdolls = new RagdollManager(this.scene, 20);
     this.audio = new AudioEngine();
 
@@ -262,6 +265,8 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.profile.pixelRatio));
     this.renderer.setSize(w, h);
     this.scope.setSize(w, h);
+    this.effects?.setViewport(this.renderer.domElement.height);
+    this.blood?.setViewport(this.renderer.domElement.height);
   }
 
   // ============================================================ session
@@ -760,7 +765,7 @@ export class Game {
 
     this.ragdolls.update(dt);
     this.effects.update(dt, this.camera);
-    this.blood.update(dt);
+    this.blood.update(dt, this.camera);
     if (!this.rebuilding) this.map.update(dt, this.camera);
     this.audio.updateListener(this.camera);
 

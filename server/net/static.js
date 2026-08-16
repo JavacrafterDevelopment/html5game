@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 
-const ALLOWED_ROOTS = ['client', 'shared'];
+const ALLOWED_ROOTS = ['client', 'shared', 'assets'];
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -30,7 +30,9 @@ const MIME = {
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
-  '.md': 'text/markdown; charset=utf-8'
+  '.md': 'text/markdown; charset=utf-8',
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json'
 };
 
 const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.json', '.svg', '.txt', '.md']);

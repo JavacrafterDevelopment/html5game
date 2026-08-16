@@ -10,6 +10,29 @@
  */
 
 import * as THREE from '../core/three.js';
+import { parseBase64GLB, loadGLB } from '../core/GLBParser.js';
+import { AK_GLB_BASE64 } from '../assets/AKModelData.js';
+
+let cachedAK47 = null;
+try {
+  cachedAK47 = parseBase64GLB(AK_GLB_BASE64);
+} catch (err) {
+  console.warn('Failed to parse bundled AK GLB model:', err);
+}
+
+/** Preload binary weapon assets before deployment */
+export async function preloadWeaponModels() {
+  if (cachedAK47) return;
+  try {
+    cachedAK47 = await loadGLB('/client/assets/ak.glb');
+  } catch (e) {
+    try {
+      cachedAK47 = await loadGLB('/assets/ak.glb');
+    } catch (err) {
+      console.warn('Failed to load ak.glb, falling back to procedural model:', err);
+    }
+  }
+}
 
 // ------------------------------------------------------------------ materials
 let M = null;
@@ -91,6 +114,32 @@ function marker(parent, x, y, z) {
 
 // ------------------------------------------------------------------- AK-47
 function buildAK47() {
+  if (cachedAK47) {
+    const group = new THREE.Group();
+    const model = cachedAK47.clone(true);
+    // Point muzzle down -Z:
+    model.rotation.y = Math.PI / 2;
+    group.add(model);
+
+    group.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.receiveShadow = false;
+      }
+    });
+
+    const muzzle = marker(group, 0, 0.0, -0.47);
+    const eject = marker(group, 0.032, 0.02, 0.06);
+
+    return {
+      group,
+      muzzle,
+      eject,
+      sight: new THREE.Vector3(0, 0.054, -0.22),
+      id: 'ak47'
+    };
+  }
+
   const b = new GunBuilder();
   const m = b.mats;
 

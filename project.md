@@ -182,12 +182,13 @@ html5game/
 │       │       ├── TerrainMesh.js      green terrain painting
 │       │       ├── GrassField.js       instanced wind-swayed grass
 │       │       ├── HutMesh.js          huts built from the collision boxes
-│       │       ├── Props.js            trees, hedge, fences, haystacks, carts
+│       │       ├── CaveMesh.js         cave rock, clamped inside its collider
+│       │       ├── Props.js            trees, hedge, haystacks, carts
 │       │       ├── Sheep.js            wandering flocks
 │       │       └── Sky.js              summer sky + drifting clouds
 │       ├── effects/
 │       │   ├── Snowfall.js      GPU snow, camera-tiled
-│       │   ├── WindMotes.js     visible wind, camera-tiled
+│       │   ├── WindMotes.js     wind streak lines + motes, camera-tiled
 │       │   ├── Blood.js         hit mist, bleed trails, death pools
 │       │   └── Impacts.js       tracers, muzzle flash, debris, brass
 │       ├── audio/AudioEngine.js procedural gunshots, footsteps, wind (no audio files)
@@ -327,24 +328,40 @@ enemy, penalising recently used spawns.
 
 ### Hollowmere — grassy plains
 
-Open summer farmland: rolling fields, a village of thatched huts, fenced paddocks,
-haystacks, hedgerows and sheep. Deliberately gentle underfoot — nothing here is
-steep enough to slide on.
+Wide open plains: rolling grassland, two thatched huts, haystacks, hedgerows, sheep,
+and a rock cave at the centre. Deliberately gentle underfoot — nothing here is steep
+enough to slide on, and there is very little between you and the horizon.
 
-- **Grass** — 16,000 instanced tufts with the wind baked into the vertex shader via
-  `onBeforeCompile`, so the blades still receive the scene's lighting, fog and
-  shadows. Two details make the wind *readable* rather than a generic wobble: a
-  constant lean downwind, and a phase that advances along the wind vector, so gusts
-  travel across the field as visible waves instead of every blade moving in unison.
-  Distant blades shrink into the painted ground rather than popping out.
-- **Wind** — one vector drives the grass, the drifting clouds and a thin haze of
-  airborne motes, so everything visibly agrees about which way it is blowing. The
-  motes use the same camera-tiling trick as the snowfall: world-locked, zero CPU.
+**The cave** sits in the middle of the map with exactly one entrance, on its south
+side. It is built as a rock chamber standing ON the terrain rather than carved INTO
+it — that is forced by the collision model, since the heightfield always pushes a
+player up out of the ground, so there is no legitimate way to be below it. Standing
+the chamber on levelled ground gives a real floor and 3.6 m of headroom for free,
+and a skin of boulders hides the fact that it is a mound rather than a hole. Every
+one of those boulders is clamped inside the collision volume: rock drawn outside its
+collider is the inverse of an invisible wall, and just as bad.
+
+- **Grass** — 38,000 instanced tufts (roughly 1.4 per square metre around you) with
+  the wind baked into the vertex shader via `onBeforeCompile`, so the blades still
+  receive the scene's lighting, fog and shadows. Two details make the wind *readable*
+  rather than a generic wobble: a constant lean downwind, and a phase that advances
+  along the wind vector, so gusts travel across the field as visible waves instead of
+  every blade moving in unison. Distant blades shrink into the painted ground rather
+  than popping out.
+- **Wind** — long flowing streak lines in the air, Ghost of Tsushima style: instanced
+  ribbons stretched along the wind vector and rolled to face the camera, fading in
+  and out on their own gust cycles. Streaks seen end-on are hidden rather than drawn
+  as smears. Dust motes ride along for grain. The same wind vector drives the grass
+  and the drifting clouds, so everything agrees about which way it is blowing.
+- **No fences.** They were removed: thin axis-aligned rails made contact feel
+  unreliable, and an open plain is the point of the map.
 - **Sheep** — five flocks that graze, amble around their anchor, and scatter when a
   gun goes off near them. Ambient only: no collider, no hitbox, no network traffic.
   Each client simulates its own flock, which nobody notices.
-- **Huts** — mud-brick walls under a thatched hip roof, drawn by filling the same
-  boxes the collider uses, with shootable window bands like the cabin.
+- **Huts** — two of them, both enterable. Mud-brick walls under a thatched hip roof,
+  drawn by filling the same boxes the collider uses, with shootable window bands like
+  the cabin. Doorways are cut to 2.25 m: the window band tops out at 1.85 m, and
+  walking a 1.80 m player through a 5 cm gap works on paper and feels terrible.
 - **The boundary is a hedgerow** — not an invisible wall, and not a slope you slide
   off. It is a ring of overlapping cylinders drawn as a thick hedge; the gaps
   between them are narrower than a player, so it is solid because of its geometry.
@@ -385,7 +402,28 @@ computed from the real cone angle, so the crosshair never lies to you.
 
 ---
 
-## 7. Blood
+## 7. Impacts and particle scale
+
+Every particle in the game is sized as a **diameter in metres** and converted to
+pixels in the shader:
+
+```glsl
+gl_PointSize = aSize * uPixelScale / distance;   // uPixelScale = bufferHeight / (2 tan(fov/2))
+```
+
+That uniform is recomputed each frame because it depends on the camera FOV, which
+changes when you aim down sights. Sizing particles in arbitrary units instead is how
+the first version ended up with snow puffs nine metres across and blood mist twenty
+metres wide — they looked fine at one distance and absurd at every other. A player's
+head is about 0.34 m across, which is the ceiling for anything here.
+
+A bullet impact emits two things rather than one ball: fast, heavy **chips** thrown
+up and back along the surface normal in a tight cone, and a few slow **puffs** of
+disturbed dust that hang for a moment behind them. Ground impacts take their colour
+from the active map (`environment.impactColor`), so a round into snow throws up
+white and a round into a meadow throws up torn green.
+
+## 8. Blood
 
 Three effects, all in [`client/js/effects/Blood.js`](client/js/effects/Blood.js):
 
@@ -401,7 +439,7 @@ Three effects, all in [`client/js/effects/Blood.js`](client/js/effects/Blood.js)
 Stains are a single InstancedMesh with a per-instance alpha attribute, so a whole
 match of blood costs one draw call. They soak away after about half a minute.
 
-## 8. Characters and ragdolls
+## 9. Characters and ragdolls
 
 The soldier is a bone hierarchy of rigid parts (65 meshes) wearing procedurally
 painted winter camo — an off-white base with grey and blue-grey blotches and printed
@@ -439,7 +477,7 @@ death view that orbits it, with a raycast to keep the camera out of terrain.
 
 ---
 
-## 9. Audio
+## 10. Audio
 
 Every sound is synthesised at runtime from noise and oscillators — there is not a
 single audio file in the project, which is a large part of why it unzips and runs
@@ -459,7 +497,7 @@ There are, deliberately, no hit or kill sounds anywhere in `AudioEngine.js`.
 
 ---
 
-## 10. Controls
+## 11. Controls
 
 | Input | Action |
 |---|---|
@@ -481,7 +519,7 @@ type is intentional, not a pause.
 
 ---
 
-## 11. Tuning
+## 12. Tuning
 
 Almost everything worth changing is in two files:
 
@@ -502,7 +540,7 @@ __whiteout.settings.set('quality', 'ultra')   // auto | low | medium | high | ul
 
 ---
 
-## 12. Testing
+## 13. Testing
 
 ```bash
 runtime\node\node.exe tools\test-all.mjs
@@ -534,7 +572,7 @@ Two of these exist because of bugs that were genuinely nasty to find:
 
 ---
 
-## 13. Extending it
+## 14. Extending it
 
 **A new weapon** — add an entry to `shared/weapons.js` and a builder in
 `client/js/weapons/WeaponModels.js` returning `{ group, muzzle, eject, sight }`.
@@ -550,7 +588,7 @@ same three hooks: `onKill`, `pickSpawn`, `isOver`.
 
 ---
 
-## 14. Known limitations
+## 15. Known limitations
 
 - The bundled `runtime/node` is the **Windows x64** build. On macOS/Linux,
   `start.sh` falls back to a system Node 18+ (the game itself is platform-agnostic).
@@ -567,7 +605,7 @@ same three hooks: `onKill`, `pickSpawn`, `isOver`.
 
 ---
 
-## 15. Credits
+## 16. Credits
 
 Three.js r160 (MIT), vendored in `client/vendor/`. Everything else — terrain,
 weapons, characters, camo, animation, ragdoll physics, audio, the WebSocket server —

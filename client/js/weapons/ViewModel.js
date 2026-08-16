@@ -50,8 +50,8 @@ export class ViewModel {
     this._muzzleWorld = new THREE.Vector3();
   }
 
-  setWeapon(id) {
-    if (this.weaponId === id) return;
+  setWeapon(id, force = false) {
+    if (this.weaponId === id && this.model && !force) return;
     if (this.model) {
       this.holder.remove(this.model.group);
       disposeWeaponModel(this.model);

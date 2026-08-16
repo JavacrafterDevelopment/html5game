@@ -13,7 +13,8 @@ import { KIND } from '../kinds.js';
 
 const WALL_H = 2.65;
 const WALL_T = 0.34;
-const DOOR_HALF = 0.75;
+const DOOR_HALF = 0.85;
+const DOOR_H = 2.25;      // comfortably taller than a 1.80 m player
 const SILL_LOW = 1.05;
 const SILL_HIGH = 1.85;
 const WIN_HALF = 0.62;
@@ -53,8 +54,16 @@ function wallAlongX(out, cx, halfW, zMin, zMax, floorY, windows, door) {
     out.push(box(cursor, floorY + SILL_LOW, zMin, cx + halfW, floorY + SILL_HIGH, zMax, KIND.WALL));
   }
 
-  // top band -- solid all the way across, door header included
-  out.push(box(cx - halfW, floorY + SILL_HIGH, zMin, cx + halfW, top, zMax, KIND.WALL));
+  // Doorway band. The window band only reaches 1.85 m and the player is 1.80 m --
+  // walking through a 5 cm gap works in theory and feels awful, so the door is cut
+  // all the way to DOOR_H and only the header above it is solid.
+  if (door) {
+    out.push(box(cx - halfW, floorY + SILL_HIGH, zMin, cx - DOOR_HALF, floorY + DOOR_H, zMax, KIND.WALL));
+    out.push(box(cx + DOOR_HALF, floorY + SILL_HIGH, zMin, cx + halfW, floorY + DOOR_H, zMax, KIND.WALL));
+    out.push(box(cx - halfW, floorY + DOOR_H, zMin, cx + halfW, top, zMax, KIND.WALL));
+  } else {
+    out.push(box(cx - halfW, floorY + SILL_HIGH, zMin, cx + halfW, top, zMax, KIND.WALL));
+  }
 }
 
 /** Same, for walls running along Z. */
@@ -81,7 +90,13 @@ function wallAlongZ(out, cz, halfD, xMin, xMax, floorY, windows, door) {
     out.push(box(xMin, floorY + SILL_LOW, cursor, xMax, floorY + SILL_HIGH, cz + halfD, KIND.WALL));
   }
 
-  out.push(box(xMin, floorY + SILL_HIGH, cz - halfD, xMax, top, cz + halfD, KIND.WALL));
+  if (door) {
+    out.push(box(xMin, floorY + SILL_HIGH, cz - halfD, xMax, floorY + DOOR_H, cz - DOOR_HALF, KIND.WALL));
+    out.push(box(xMin, floorY + SILL_HIGH, cz + DOOR_HALF, xMax, floorY + DOOR_H, cz + halfD, KIND.WALL));
+    out.push(box(xMin, floorY + DOOR_H, cz - halfD, xMax, top, cz + halfD, KIND.WALL));
+  } else {
+    out.push(box(xMin, floorY + SILL_HIGH, cz - halfD, xMax, top, cz + halfD, KIND.WALL));
+  }
 }
 
 /**

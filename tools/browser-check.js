@@ -107,6 +107,35 @@
       - rag.links.find((l) => l.a === 'shoulderL' && l.b === 'elbowL').rest) < 0.05);
   g._onPlayerLeave({ id: 99991 });
 
+  // ---- 6b. decorative rock must not overhang its collider ----
+  // A boulder drawn outside the collision volume is the inverse of an invisible
+  // wall: solid-looking rock you walk straight through. Box3.setFromObject is not
+  // instance-aware, so this measures the instance matrices directly.
+  if (g.map.cave) {
+    const THREE = await import('/client/vendor/three.module.js');
+    const { CAVE } = await import('/shared/maps/grassy_plains/cave.js');
+    const m4 = new THREE.Matrix4();
+    const p = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion();
+    let over = 0;
+    for (const mesh of g.map.cave.children) {
+      if (!mesh.isInstancedMesh) continue;
+      mesh.geometry.computeBoundingBox();
+      const gb = mesh.geometry.boundingBox;
+      const gx = Math.max(Math.abs(gb.min.x), Math.abs(gb.max.x));
+      const gz = Math.max(Math.abs(gb.min.z), Math.abs(gb.max.z));
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, m4);
+        m4.decompose(p, q, s);
+        over = Math.max(over,
+          (CAVE.x - CAVE.halfW) - (p.x - gx * s.x),
+          (p.x + gx * s.x) - (CAVE.x + CAVE.halfW),
+          (CAVE.z - CAVE.halfD) - (p.z - gz * s.z),
+          (p.z + gz * s.z) - (CAVE.z + CAVE.halfD + CAVE.mouthLen));
+      }
+    }
+    check('cave rock stays inside its collision volume', over < 0.15, `overhang ${over.toFixed(2)} m`);
+  }
+
   // ---- 7. hardcore rules ----
   check('no hitmarker element exists', !document.querySelector('#hitmarker, .hitmarker'));
   check('no kill feed element exists', !document.querySelector('#killfeed, .killfeed, .kill-feed'));

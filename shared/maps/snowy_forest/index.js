@@ -24,6 +24,8 @@ export const MAP_INFO = {
     ambientIntensity: 0.85,
     sunAzimuth: 2.4,
     sunElevation: 0.32,
+    /** What a bullet kicks out of the ground here: powder snow. */
+    impactColor: [0.93, 0.96, 1.0],
     snowfallRate: 1.0,
     windDirection: [0.55, -0.28],
     windStrength: 1.4

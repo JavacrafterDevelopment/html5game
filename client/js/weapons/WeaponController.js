@@ -70,11 +70,10 @@ export class WeaponController {
   get isScoped() { return !!this.weapon.scope && this.view.isAimed; }
 
   setLoadout(primary) {
-    if (primary === this.primary) return;
     this.primary = primary;
     this.slot = 0;
     this._initAmmo();
-    this.view.setWeapon(this.weaponId);
+    this.view.setWeapon(this.weaponId, true);
     this.reloading = false;
   }
 
@@ -99,7 +98,7 @@ export class WeaponController {
     this.reloadEndsAt = 0;
     this.boltUntil = 0;
     this.spread = 0;
-    this.view.setWeapon(this.weaponId);
+    this.view.setWeapon(this.weaponId, true);
   }
 
   switchTo(slot) {

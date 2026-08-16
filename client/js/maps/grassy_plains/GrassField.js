@@ -18,6 +18,7 @@
 import * as THREE from '../../core/three.js';
 import { mergeGeometries } from '../../core/GeoUtils.js';
 import { TERRAIN, heightAt, slopeAt, HUT_SITES } from '/shared/maps/grassy_plains/terrain.js';
+import { nearCave } from '/shared/maps/grassy_plains/cave.js';
 import { makeRng } from '/shared/math/num.js';
 
 const BLADE_H = 1.0;   // geometry is authored 1 unit tall; instance scale sets real height
@@ -100,7 +101,7 @@ export class GrassField {
    * @param {{ count?: number, wind?: number[], strength?: number, viewDistance?: number }} opts
    */
   constructor(opts = {}) {
-    const count = opts.count ?? 16000;
+    const count = opts.count ?? 38000;
     const wind = opts.wind ?? [0.82, 0.57];
     const strength = opts.strength ?? 1.0;
     const viewDistance = opts.viewDistance ?? 58;
@@ -126,7 +127,7 @@ export class GrassField {
       const a = rng() * Math.PI * 2;
       const rad = Math.sqrt(rng()) * R;
       const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
-      if (nearHut(x, z)) continue;
+      if (nearHut(x, z) || nearCave(x, z, 1)) continue;
       if (slopeAt(x, z) > 0.5) continue;
       buckets[attempt % 3].push({ x, z, y: heightAt(x, z), s: 0.26 + rng() * 0.30, t: rng() });
       placed++;

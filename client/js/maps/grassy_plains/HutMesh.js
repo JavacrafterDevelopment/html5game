@@ -101,7 +101,7 @@ export function createHuts() {
     thatch.push(boxGeo(0.5, 0.28, 0.5, x, top + roofRise + 0.08, z, THATCH_A, 0, Math.PI / 4, 0));
 
     // --- doorway frame + dark interior mouth ---
-    const dh = hut.sillHigh + 0.35;
+    const dh = hut.doorH ?? (hut.sillHigh + 0.35);
     const dhalf = hut.doorHalf;
     if (hut.door === 'plusZ' || hut.door === 'minusZ') {
       const zz = hut.door === 'plusZ' ? z + halfD + wallT * 0.5 : z - halfD - wallT * 0.5;

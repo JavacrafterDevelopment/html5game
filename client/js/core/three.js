@@ -5,4 +5,4 @@
  * the whole project has to work on a LAN with no internet connection at all.
  * Everything else in the client imports THREE from here.
  */
-export * from '/client/vendor/three.module.js';
+export * from '../../vendor/three.module.js';

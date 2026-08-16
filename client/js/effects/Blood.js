@@ -213,6 +213,7 @@ class DecalField {
 // ------------------------------------------------------------- droplets
 const DROP_VERT = /* glsl */`
 #include <fog_pars_vertex>
+uniform float uPixelScale;
 attribute float aSize;
 attribute float aAlpha;
 varying float vAlpha;
@@ -220,7 +221,8 @@ void main() {
   vAlpha = aAlpha;
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mvPosition;
-  gl_PointSize = aSize * (300.0 / max(-mvPosition.z, 0.5));
+  // aSize is a DIAMETER IN METRES -- a head is about 0.34 m across.
+  gl_PointSize = clamp(aSize * uPixelScale / max(-mvPosition.z, 0.15), 1.0, 200.0);
   #include <fog_vertex>
 }
 `;
@@ -268,6 +270,7 @@ class Droplets {
 
     const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {}]);
     uniforms.uColor = { value: new THREE.Color(0x8e1410) };
+    uniforms.uPixelScale = { value: 600 };
 
     this.points = new THREE.Points(geo, new THREE.ShaderMaterial({
       uniforms,
@@ -314,7 +317,7 @@ class Droplets {
         const drag = Math.exp(-3.4 * dt);
         this.vel[i3] *= drag; this.vel[i3 + 1] *= drag; this.vel[i3 + 2] *= drag;
         this.vel[i3 + 1] += 0.6 * dt;
-        size[i] += 14 * dt;
+        size[i] += 0.32 * dt;
         alpha[i] = Math.pow(Math.max(0, this.life[i] / this.maxLife[i]), 1.7) * 0.5;
       } else {
         this.vel[i3 + 1] -= 19 * dt;
@@ -358,11 +361,11 @@ export class BloodSystem {
     const n = Math.round(9 + amount * 16);
     // exit-side spray follows the round, with a wide cone
     for (let i = 0; i < n; i++) {
-      const spread = 0.55;
-      const vx = dir[0] * (2.2 + Math.random() * 3.4) + (Math.random() - 0.5) * spread * 6;
-      const vy = dir[1] * 2.0 + 0.6 + (Math.random() - 0.5) * spread * 5;
-      const vz = dir[2] * (2.2 + Math.random() * 3.4) + (Math.random() - 0.5) * spread * 6;
-      this.droplets.spawn(point, [vx, vy, vz], 3 + Math.random() * 5, 0.5 + Math.random() * 0.6, false);
+      const spread = 0.42;
+      const vx = dir[0] * (1.8 + Math.random() * 2.6) + (Math.random() - 0.5) * spread * 4;
+      const vy = dir[1] * 1.6 + 0.9 + (Math.random() - 0.5) * spread * 3.4;
+      const vz = dir[2] * (1.8 + Math.random() * 2.6) + (Math.random() - 0.5) * spread * 4;
+      this.droplets.spawn(point, [vx, vy, vz], 0.012 + Math.random() * 0.022, 0.45 + Math.random() * 0.5, false);
     }
     // the hanging mist cloud
     const mistCount = Math.round(5 + amount * 8);
@@ -374,14 +377,14 @@ export class BloodSystem {
         [dir[0] * 1.1 + (Math.random() - 0.5) * 1.2,
          0.35 + Math.random() * 0.5,
          dir[2] * 1.1 + (Math.random() - 0.5) * 1.2],
-        11 + Math.random() * 10, 0.42 + Math.random() * 0.3, true
+        0.07 + Math.random() * 0.09, 0.42 + Math.random() * 0.3, true
       );
     }
     // a little cast-off on the ground behind the hit
     if (amount > 0.35) {
       this.decals.add(
         [point[0] + dir[0] * 1.1, point[1], point[2] + dir[2] * 1.1],
-        0.28 + Math.random() * 0.3, 0, DECAL_LIFE * 0.7
+        0.14 + Math.random() * 0.14, 0, DECAL_LIFE * 0.7
       );
     }
   }
@@ -396,14 +399,14 @@ export class BloodSystem {
     this._lastDrip.set(playerId, [position[0], position[2]]);
     this.decals.add(
       [position[0] + (Math.random() - 0.5) * 0.3, position[1], position[2] + (Math.random() - 0.5) * 0.3],
-      0.09 + Math.random() * 0.09, 0, DECAL_LIFE * 0.6
+      0.05 + Math.random() * 0.06, 0, DECAL_LIFE * 0.6
     );
     // an occasional falling drop, so bleeding reads in the air too
     if (Math.random() < 0.4) {
       this.droplets.spawn(
         [position[0], position[1] + 0.9, position[2]],
         [(Math.random() - 0.5) * 0.4, -0.4, (Math.random() - 0.5) * 0.4],
-        3, 0.5, false
+        0.016, 0.5, false
       );
     }
   }
@@ -426,7 +429,17 @@ export class BloodSystem {
     this._lastDrip.delete(playerId);
   }
 
-  update(dt) {
+  /** Drawing-buffer height in device pixels, for world-unit particle sizing. */
+  setViewport(bufferHeight) {
+    this.bufferHeight = bufferHeight || 800;
+  }
+
+  update(dt, camera) {
+    if (camera) {
+      const scale = (this.bufferHeight || 800) / (2 * Math.tan((camera.fov * Math.PI) / 360));
+      const u = this.droplets.points.material.uniforms;
+      if (u.uPixelScale) u.uPixelScale.value = scale;
+    }
     this.decals.update(dt);
     this.droplets.update(dt);
   }
