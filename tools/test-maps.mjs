@@ -165,5 +165,83 @@ function testMap(id, map) {
   ok(`boundary holds by geometry in all ${dirs} directions (furthest reach ${maxReach.toFixed(1)} m, clamp at ${TERRAIN.hardRadius} m)`);
 }
 
-for (const [id, map] of Object.entries(MAPS)) testMap(id, map);
+/**
+ * The cave has to be enterable through its one mouth and sealed everywhere else.
+ * Both halves matter: a cave you cannot walk into is scenery, and a cave with a
+ * second way in is not what was asked for.
+ */
+function testCave(map) {
+  const { heightAt, collideCapsule, CHAMBER, CAVE } = map;
+  const dt = 1 / 60;
+
+  const inside = (p) =>
+    p[0] > CHAMBER.minX && p[0] < CHAMBER.maxX &&
+    p[2] > CHAMBER.minZ && p[2] < CHAMBER.maxZ;
+
+  const walk = (fromX, fromZ, dx, dz) => {
+    const pos = [fromX, heightAt(fromX, fromZ), fromZ];
+    let vx = 0, vz = 0;
+    for (let step = 0; step < 900; step++) {
+      vx += (dx * MOVE.WALK - vx) * 0.35;
+      vz += (dz * MOVE.WALK - vz) * 0.35;
+      pos[0] += vx * dt;
+      pos[2] += vz * dt;
+      pos[1] = Math.max(pos[1] - 9 * dt, heightAt(pos[0], pos[2]));
+      collideCapsule(pos, PLAYER.RADIUS, PLAYER.HEIGHT, PLAYER.STEP_HEIGHT);
+    }
+    return pos;
+  };
+
+  // in through the mouth
+  const entered = walk(CAVE.x, CAVE.z + CAVE.halfD + CAVE.mouthLen + 6, 0, -1);
+  assert.ok(inside(entered), `could not walk into the cave (ended at ${entered.map((v) => v.toFixed(1))})`);
+  ok('cave is enterable through its mouth');
+
+  assert.ok(CHAMBER.ceilY - CHAMBER.floorY > PLAYER.HEIGHT + 0.5,
+    'not enough headroom to stand up inside the cave');
+  ok(`cave has ${(CHAMBER.ceilY - CHAMBER.floorY).toFixed(1)} m of headroom`);
+
+  // and not through anything else
+  const sides = [[0, 1, 'back'], [1, 0, 'west'], [-1, 0, 'east']];
+  const breaches = sides.filter(([dx, dz]) =>
+    inside(walk(CAVE.x - dx * (CAVE.halfW + 8), CAVE.z - dz * (CAVE.halfD + 8), dx, dz)));
+  assert.strictEqual(breaches.length, 0,
+    `cave has extra ways in: ${breaches.map((b) => b[2]).join(', ')}`);
+  ok('cave has exactly one entrance');
+}
+
+/** Buildings you are told you can enter must actually be enterable. */
+function testHuts(map) {
+  const { heightAt, collideCapsule, HUTS } = map;
+  const dt = 1 / 60;
+  const dirs = { plusZ: [0, 1], minusZ: [0, -1], plusX: [1, 0], minusX: [-1, 0] };
+
+  for (const hut of HUTS) {
+    const [ox, oz] = dirs[hut.door];
+    const reach = Math.max(hut.halfW, hut.halfD) + 7;
+    const pos = [hut.x + ox * reach, 0, hut.z + oz * reach];
+    pos[1] = heightAt(pos[0], pos[2]);
+    let vx = 0, vz = 0;
+
+    for (let step = 0; step < 800; step++) {
+      vx += (-ox * MOVE.WALK - vx) * 0.35;
+      vz += (-oz * MOVE.WALK - vz) * 0.35;
+      pos[0] += vx * dt;
+      pos[2] += vz * dt;
+      pos[1] = Math.max(pos[1] - 9 * dt, heightAt(pos[0], pos[2]));
+      collideCapsule(pos, PLAYER.RADIUS, PLAYER.HEIGHT, PLAYER.STEP_HEIGHT);
+    }
+
+    const inside = Math.abs(pos[0] - hut.x) < hut.halfW && Math.abs(pos[2] - hut.z) < hut.halfD;
+    assert.ok(inside, `could not walk into the hut at ${hut.x.toFixed(0)},${hut.z.toFixed(0)}`);
+    assert.ok(hut.wallH > PLAYER.HEIGHT + 0.4, 'not enough headroom inside the hut');
+  }
+  ok(`all ${HUTS.length} huts are enterable and stand-up-able`);
+}
+
+for (const [id, map] of Object.entries(MAPS)) {
+  testMap(id, map);
+  if (map.CHAMBER) testCave(map);
+  if (map.HUTS) testHuts(map);
+}
 console.log(`\n${checks} checks passed.`);

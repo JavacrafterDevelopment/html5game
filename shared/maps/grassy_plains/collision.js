@@ -9,7 +9,8 @@
 
 import { TERRAIN, heightAt, normalAt } from './terrain.js';
 import { HUT_BOXES } from './huts.js';
-import { PROPS, fieldRuns, SPAWN_CANDIDATES } from './props.js';
+import { PROPS, SPAWN_CANDIDATES } from './props.js';
+import { CAVE_BOXES } from './cave.js';
 import { PLAYER } from '../../config.js';
 import { KIND } from '../kinds.js';
 import { createColliderWorld } from '../ColliderWorld.js';
@@ -66,29 +67,9 @@ for (const c of PROPS.carts) {
   );
 }
 
-// ----------------------------------------------------------------- fences
-// One long thin axis-aligned box per run. Fence posts and rails are drawn inside
-// exactly this volume, so the fence is never wider than it looks.
-for (const f of PROPS.fields) {
-  for (const run of fieldRuns(f)) {
-    const half = f.thickness / 2;
-    if (run.axis === 'x') {
-      const y = heightAt((run.from + run.to) / 2, run.fixed);
-      world.addBox(
-        [run.from, y - 0.6, run.fixed - half],
-        [run.to, y + f.height, run.fixed + half],
-        KIND.FENCE
-      );
-    } else {
-      const y = heightAt(run.fixed, (run.from + run.to) / 2);
-      world.addBox(
-        [run.fixed - half, y - 0.6, run.from],
-        [run.fixed + half, y + f.height, run.to],
-        KIND.FENCE
-      );
-    }
-  }
-}
+// ------------------------------------------------------------------- cave
+// Walls, roof and the single entrance. Same boxes the renderer fills with rock.
+for (const b of CAVE_BOXES) world.addBox(b.min, b.max, b.kind);
 
 world.build();
 

@@ -2,9 +2,10 @@
  * Grassy Plains -- map bundle.
  */
 
-export { TERRAIN, heightAt, normalAt, slopeAt, isWalkable, HUT_SITES } from './terrain.js';
+export { TERRAIN, heightAt, normalAt, slopeAt, isWalkable, HUT_SITES, CAVE_SITE, CAVE_BASE_Y } from './terrain.js';
 export { HUTS, HUT_BOXES } from './huts.js';
-export { PROPS, SHEEP_HERDS, TREE_VARIANTS, fieldRuns } from './props.js';
+export { PROPS, SHEEP_HERDS, TREE_VARIANTS } from './props.js';
+export { CAVE, CAVE_BOXES, CAVE_PARTS, CHAMBER, insideCave, nearCave } from './cave.js';
 export { collideCapsule, raycastWorld, raycastTerrain, isBlocked, KIND, COLLIDER_COUNT, COLLIDERS, SPAWN_POINTS } from './collision.js';
 
 export const MAP_INFO = {
@@ -30,6 +31,8 @@ export const MAP_INFO = {
     windGustiness: 0.45,
     grassColorA: 0x5f8a3c,
     grassColorB: 0x86a83f,
-    grassColorDry: 0xa8a95c
+    grassColorDry: 0xa8a95c,
+    /** What a bullet kicks out of the ground here: torn grass and soil. */
+    impactColor: [0.34, 0.52, 0.19]
   }
 };

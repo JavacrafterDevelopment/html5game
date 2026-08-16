@@ -10,6 +10,7 @@
 
 import { makeRng } from '../../math/num.js';
 import { TERRAIN, heightAt, slopeAt, HUT_SITES } from './terrain.js';
+import { nearCave } from './cave.js';
 
 const R = TERRAIN.playRadius;
 
@@ -45,54 +46,6 @@ function nearHut(x, z, pad = 4) {
   return false;
 }
 
-/**
- * Fenced fields. Axis-aligned on purpose: an axis-aligned box is the one collider
- * shape that is exactly as wide as it looks from every angle, which is what keeps
- * fences from catching you on nothing.
- */
-function generateFields(rng) {
-  const candidates = [
-    { x: -52, z: -18, w: 30, d: 24 },
-    { x: -20, z: 44, w: 34, d: 26 },
-    { x: 46, z: -6, w: 26, d: 30 },
-    { x: 4, z: -62, w: 28, d: 22 },
-    { x: 62, z: 48, w: 24, d: 22 }
-  ];
-  const fields = [];
-  for (const f of candidates) {
-    if (Math.hypot(f.x, f.z) + Math.max(f.w, f.d) * 0.5 > R - 4) continue;
-    // one side gets a gate so fields are enterable
-    const gateSide = Math.floor(rng() * 4);
-    const gateAt = (rng() - 0.5) * 0.5;
-    fields.push({ ...f, gateSide, gateAt, height: 1.15, thickness: 0.16 });
-  }
-  return fields;
-}
-
-/** Turn a field into fence runs, leaving a gap for the gate. */
-export function fieldRuns(f) {
-  const hw = f.w / 2, hd = f.d / 2;
-  const gateHalf = 1.6;
-  const runs = [];
-
-  const addRun = (axis, fixed, from, to, side) => {
-    if (side === f.gateSide) {
-      const centre = (from + to) / 2 + (to - from) * f.gateAt;
-      const a = centre - gateHalf, b = centre + gateHalf;
-      if (a > from) runs.push({ axis, fixed, from, to: a });
-      if (b < to) runs.push({ axis, fixed, from: b, to });
-    } else {
-      runs.push({ axis, fixed, from, to });
-    }
-  };
-
-  addRun('x', f.z - hd, f.x - hw, f.x + hw, 0);   // north fence, runs along X
-  addRun('x', f.z + hd, f.x - hw, f.x + hw, 1);   // south
-  addRun('z', f.x - hw, f.z - hd, f.z + hd, 2);   // west, runs along Z
-  addRun('z', f.x + hw, f.z - hd, f.z + hd, 3);   // east
-  return runs;
-}
-
 function generate() {
   const rng = makeRng(TERRAIN.seed ^ 0x9a17);
   const spacer = makeSpacer(6);
@@ -104,19 +57,13 @@ function generate() {
   const wells = [];
   const carts = [];
 
-  const fields = generateFields(rng);
-
-  const insideField = (x, z, pad = 1.5) => fields.some(
-    (f) => Math.abs(x - f.x) < f.w / 2 + pad && Math.abs(z - f.z) < f.d / 2 + pad
-  );
 
   // ------------------------------------------------------------- open trees
   for (let attempt = 0; attempt < 3000 && trees.length < 120; attempt++) {
     const a = rng() * Math.PI * 2;
     const rad = Math.sqrt(rng()) * (R - 6);
     const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
-    if (nearHut(x, z, 6)) continue;
-    if (insideField(x, z)) continue;
+    if (nearHut(x, z, 6) || nearCave(x, z, 6)) continue;
     if (slopeAt(x, z) > 0.4) continue;
     if (!spacer.tryPlace(x, z, 9)) continue;
 
@@ -178,8 +125,7 @@ function generate() {
     const a = rng() * Math.PI * 2;
     const rad = Math.sqrt(rng()) * (R - 5);
     const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
-    if (nearHut(x, z, 5)) continue;
-    if (insideField(x, z)) continue;
+    if (nearHut(x, z, 5) || nearCave(x, z, 5)) continue;
     if (!spacer.tryPlace(x, z, 7)) continue;
     const r = 0.6 + rng() * 1.7;
     rocks.push({ x, z, y: heightAt(x, z), r, squash: 0.55 + rng() * 0.3, rot: rng() * Math.PI * 2 });
@@ -190,7 +136,7 @@ function generate() {
     const a = rng() * Math.PI * 2;
     const rad = Math.sqrt(rng()) * (R - 8);
     const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
-    if (nearHut(x, z, 5)) continue;
+    if (nearHut(x, z, 5) || nearCave(x, z, 5)) continue;
     if (slopeAt(x, z) > 0.22) continue;
     if (!spacer.tryPlace(x, z, 8)) continue;
     haystacks.push({
@@ -204,12 +150,13 @@ function generate() {
   // --------------------------------------------------------- wells, carts
   const vx = HUT_SITES.length ? HUT_SITES[0].x : 0;
   const vz = HUT_SITES.length ? HUT_SITES[0].z : 0;
-  wells.push({ x: 16, z: -20, y: heightAt(16, -20), r: 1.05, h: 0.95 });
+  const wellX = HUT_SITES[0].x + 7, wellZ = HUT_SITES[0].z + 6;
+  wells.push({ x: wellX, z: wellZ, y: heightAt(wellX, wellZ), r: 1.05, h: 0.95 });
   for (let i = 0; i < 5; i++) {
     const a = rng() * Math.PI * 2;
     const rad = 20 + rng() * 45;
     const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
-    if (nearHut(x, z, 3)) continue;
+    if (nearHut(x, z, 3) || nearCave(x, z, 3)) continue;
     if (!spacer.tryPlace(x, z, 6)) continue;
     carts.push({
       x, z, y: heightAt(x, z),
@@ -224,7 +171,7 @@ function generate() {
     const a = rng() * Math.PI * 2;
     const rad = Math.sqrt(rng()) * (R + 3);
     const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
-    if (nearHut(x, z, 3)) continue;
+    if (nearHut(x, z, 3) || nearCave(x, z, 3)) continue;
     bushes.push({ x, z, y: heightAt(x, z), r: 0.5 + rng() * 0.9, rot: rng() * Math.PI * 2 });
   }
   for (let i = 0; i < 420; i++) {
@@ -239,7 +186,7 @@ function generate() {
     });
   }
 
-  return { trees, woods, hedge, rocks, haystacks, bushes, flowers, wells, carts, fields };
+  return { trees, woods, hedge, rocks, haystacks, bushes, flowers, wells, carts };
 }
 
 export const PROPS = generate();
@@ -252,7 +199,7 @@ export const SHEEP_HERDS = (() => {
     const a = rng() * Math.PI * 2;
     const rad = 18 + Math.sqrt(rng()) * (R - 32);
     const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
-    if (nearHut(x, z, 10)) continue;
+    if (nearHut(x, z, 10) || nearCave(x, z, 12)) continue;
     if (slopeAt(x, z) > 0.2) continue;
     let ok = true;
     for (const h of out) if (Math.hypot(h.x - x, h.z - z) < 34) ok = false;
@@ -271,7 +218,7 @@ function generateSpawns() {
     const rad = 10 + Math.sqrt(rng()) * (R - 20);
     const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
     if (slopeAt(x, z) > 0.22) continue;
-    if (nearHut(x, z, 3)) continue;
+    if (nearHut(x, z, 3) || nearCave(x, z, 4)) continue;
     if (!spacer.tryPlace(x, z, 15)) continue;
 
     let blocked = false;

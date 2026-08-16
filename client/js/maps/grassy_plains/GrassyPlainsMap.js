@@ -8,6 +8,7 @@
 import * as THREE from '../../core/three.js';
 import { createTerrain } from './TerrainMesh.js';
 import { createHuts } from './HutMesh.js';
+import { createCave } from './CaveMesh.js';
 import { createProps } from './Props.js';
 import { GrassField } from './GrassField.js';
 import { SheepFlocks } from './Sheep.js';
@@ -15,7 +16,9 @@ import { createSky, createLighting } from './Sky.js';
 import { WindMotes } from '../../effects/WindMotes.js';
 import { MAP_INFO } from '/shared/maps/grassy_plains/index.js';
 
-const GRASS_COUNT = { low: 4500, medium: 9000, high: 16000, ultra: 26000 };
+// This map is meant to read as open plains, so grass density is the headline
+// cost. A tuft is ~24 triangles, which is cheap enough to be generous with.
+const GRASS_COUNT = { low: 11000, medium: 22000, high: 38000, ultra: 55000 };
 
 export class GrassyPlainsMap {
   constructor(scene, options = {}) {
@@ -52,8 +55,11 @@ export class GrassyPlainsMap {
     this.props = await step(0.48, 'Planting hedgerows', () => createProps({ shadows }));
     this.scene.add(this.props);
 
-    this.huts = await step(0.66, 'Raising the huts', () => createHuts());
+    this.huts = await step(0.62, 'Raising the huts', () => createHuts());
     this.scene.add(this.huts);
+
+    this.cave = await step(0.70, 'Hollowing the cave', () => createCave({ shadows }));
+    this.scene.add(this.cave);
 
     this.grass = await step(0.78, 'Sowing the grass', () => new GrassField({
       count: GRASS_COUNT[quality] ?? GRASS_COUNT.high,
@@ -83,7 +89,7 @@ export class GrassyPlainsMap {
     this.time += dt;
     this.grass.update(dt);
     this.sheep.update(dt);
-    this.wind.update(dt, camera.position);
+    this.wind.update(dt, camera.position, camera);
     this.lighting.update(camera.position);
     if (this.sky.material.uniforms.uTime) this.sky.material.uniforms.uTime.value = this.time;
     this.sky.position.copy(camera.position);
@@ -97,7 +103,7 @@ export class GrassyPlainsMap {
   dispose() {
     if (!this.built) return;
     this.scene.remove(this.sky, this.lighting.group, this.terrain,
-      this.props, this.huts, this.grass.group, this.sheep.group, this.wind.group);
+      this.props, this.huts, this.cave, this.grass.group, this.sheep.group, this.wind.group);
     this.grass.dispose();
     this.sheep.dispose();
     this.wind.dispose();
@@ -108,7 +114,7 @@ export class GrassyPlainsMap {
         else o.material?.dispose();
       }
     });
-    kill(this.terrain); kill(this.props); kill(this.huts); kill(this.sky);
+    kill(this.terrain); kill(this.props); kill(this.huts); kill(this.cave); kill(this.sky);
     this.built = false;
   }
 }

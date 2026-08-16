@@ -93,6 +93,8 @@ export class Game {
 
     this.effects = new Effects(this.scene);
     this.blood = new BloodSystem(this.scene);
+    this.effects.setViewport(this.renderer.domElement.height);
+    this.blood.setViewport(this.renderer.domElement.height);
     this.ragdolls = new RagdollManager(this.scene, 20);
     this.audio = new AudioEngine();
 
@@ -262,6 +264,8 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.profile.pixelRatio));
     this.renderer.setSize(w, h);
     this.scope.setSize(w, h);
+    this.effects?.setViewport(this.renderer.domElement.height);
+    this.blood?.setViewport(this.renderer.domElement.height);
   }
 
   // ============================================================ session
@@ -760,7 +764,7 @@ export class Game {
 
     this.ragdolls.update(dt);
     this.effects.update(dt, this.camera);
-    this.blood.update(dt);
+    this.blood.update(dt, this.camera);
     if (!this.rebuilding) this.map.update(dt, this.camera);
     this.audio.updateListener(this.camera);
 

@@ -57,43 +57,29 @@ function rawHeight(x, z) {
 }
 
 /**
- * Hut sites. Generated here (not in huts.js) because the terrain has to know about
- * them in order to level their pads, and heightAt must stay a pure function.
+ * The cave sits in the middle of the map. Its floor is the terrain itself, so the
+ * ground under it has to be dead level -- a sloped floor inside a box-walled chamber
+ * would leave gaps under the walls.
+ */
+export const CAVE_SITE = { x: 0, z: 0, radius: 15, falloff: 30 };
+export const CAVE_BASE_Y = rawHeight(CAVE_SITE.x, CAVE_SITE.z);
+
+/**
+ * Hut sites. Only two, deliberately: this map is meant to read as open plains, and
+ * every building is one more thing between you and the horizon.
+ *
+ * Generated here rather than in huts.js because the terrain has to level their pads,
+ * and heightAt must stay a pure function of (x, z).
  */
 function generateSites() {
-  const rng = makeRng((S ^ 0x40b5) >>> 0);
-  const sites = [];
-  const push = (x, z, w, d) => {
-    // keep pads apart so their flatten discs do not fight each other
-    for (const s of sites) {
-      if (Math.hypot(s.x - x, s.z - z) < Math.max(w, d) + Math.max(s.w, s.d) + 7) return false;
-    }
-    sites.push({ x, z, w, d, pad: Math.max(w, d) * 0.85 + 3.5 });
-    return true;
-  };
-
-  // --- the village: a loose ring of huts around a common ---
-  const vx = 16, vz = -20;
-  for (let i = 0; i < 9; i++) {
-    const a = (i / 9) * Math.PI * 2 + 0.4;
-    const rad = 13 + (i % 3) * 4.5;
-    const w = 4.4 + (i % 4) * 0.9;
-    const d = 3.8 + ((i + 2) % 3) * 1.1;
-    push(vx + Math.cos(a) * rad, vz + Math.sin(a) * rad, w, d);
-  }
-
-  // --- outlying farmsteads ---
-  const outliers = [
-    [-46, 30], [-30, -44], [54, 26], [-62, -10], [24, 58], [66, -34]
+  const sites = [
+    { x: -38, z: 26, w: 7.0, d: 5.8 },
+    { x: 34, z: -30, w: 6.4, d: 6.4 }
   ];
-  for (const [ox, oz] of outliers) {
-    const jitterX = ox + (rng() - 0.5) * 8;
-    const jitterZ = oz + (rng() - 0.5) * 8;
-    push(jitterX, jitterZ, 4.2 + rng() * 2.2, 3.6 + rng() * 2.0);
+  for (const s of sites) {
+    s.pad = Math.max(s.w, s.d) * 0.85 + 4.0;
+    s.baseY = rawHeight(s.x, s.z);
   }
-
-  // Level each pad against the raw terrain at its centre.
-  for (const s of sites) s.baseY = rawHeight(s.x, s.z);
   return sites;
 }
 
@@ -109,6 +95,12 @@ const SITE_BOUND = (() => {
 /** Ground height in metres. */
 export function heightAt(x, z) {
   let h = rawHeight(x, z);
+
+  // cave floor: level, and it wins over everything else
+  const cd = Math.hypot(x - CAVE_SITE.x, z - CAVE_SITE.z);
+  if (cd < CAVE_SITE.falloff) {
+    h = lerp(h, CAVE_BASE_Y, smoothstep(CAVE_SITE.falloff, CAVE_SITE.radius, cd));
+  }
 
   if (Math.hypot(x, z) < SITE_BOUND) {
     for (let i = 0; i < HUT_SITES.length; i++) {

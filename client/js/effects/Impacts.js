@@ -8,7 +8,7 @@
  */
 
 import * as THREE from '../core/three.js';
-import { KIND, heightAt } from '/shared/maps/active.js';
+import { KIND, heightAt, mapInfo } from '/shared/maps/active.js';
 
 // ------------------------------------------------------------ debris particles
 // A ShaderMaterial with `fog: true` MUST also carry the fog uniforms and shader
@@ -17,6 +17,7 @@ import { KIND, heightAt } from '/shared/maps/active.js';
 // everything queued behind it (snowfall, tracers, muzzle flashes, the scope).
 const PARTICLE_VERT = /* glsl */`
 #include <fog_pars_vertex>
+uniform float uPixelScale;
 attribute float aSize;
 attribute float aAlpha;
 attribute vec3 aColor;
@@ -27,7 +28,12 @@ void main() {
   vColor = aColor;
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mvPosition;
-  gl_PointSize = aSize * (300.0 / max(-mvPosition.z, 0.5));
+
+  // aSize is a DIAMETER IN METRES. uPixelScale converts metres at one metre of
+  // depth into pixels, so a 0.1 m clod is 0.1 m on screen at any distance and any
+  // field of view. Sizing particles in arbitrary units is how you end up with
+  // snow puffs several metres across.
+  gl_PointSize = clamp(aSize * uPixelScale / max(-mvPosition.z, 0.15), 1.0, 220.0);
   #include <fog_vertex>
 }
 `;
@@ -49,15 +55,30 @@ void main() {
 }
 `;
 
+/**
+ * Impact behaviour per surface.
+ *
+ * `chip` is the debris actually kicked loose: small, fast, heavy, thrown up and
+ * back along the surface normal in a fairly tight cone -- so a round into the
+ * ground throws up a little spray of dirt or snow rather than a ball of fog.
+ * `puff` is the slower dust that hangs for a moment behind it.
+ *
+ * All sizes are DIAMETERS IN METRES. A player's head is about 0.34 m across, which
+ * is the upper bound for anything here.
+ */
 const SURFACE = {
-  [KIND.TERRAIN]: { color: [0.93, 0.96, 1.0], count: 16, speed: 3.4, size: 9, gravity: -7, life: 0.75, spread: 0.85 },
-  [KIND.ROCK]: { color: [0.55, 0.58, 0.62], count: 11, speed: 4.4, size: 6, gravity: -14, life: 0.55, spread: 0.6 },
-  [KIND.TREE]: { color: [0.36, 0.25, 0.16], count: 12, speed: 3.6, size: 6, gravity: -12, life: 0.6, spread: 0.7 },
-  [KIND.WOOD]: { color: [0.40, 0.29, 0.19], count: 12, speed: 3.6, size: 6, gravity: -12, life: 0.6, spread: 0.7 },
-  [KIND.WALL]: { color: [0.42, 0.31, 0.20], count: 13, speed: 3.8, size: 6, gravity: -12, life: 0.6, spread: 0.7 },
-  [KIND.FLOOR]: { color: [0.42, 0.31, 0.20], count: 11, speed: 3.4, size: 6, gravity: -12, life: 0.6, spread: 0.7 },
-  [KIND.ROOF]: { color: [0.85, 0.90, 0.95], count: 14, speed: 3.4, size: 8, gravity: -9, life: 0.7, spread: 0.8 },
-  [KIND.PROP]: { color: [0.5, 0.5, 0.52], count: 10, speed: 3.6, size: 6, gravity: -12, life: 0.55, spread: 0.7 }
+  [KIND.TERRAIN]: { color: [0.93, 0.96, 1.0], chips: 14, speed: 4.2, chip: [0.02, 0.055], puffs: 4, puff: [0.10, 0.20], gravity: -17, life: 0.5, spread: 0.34 },
+  [KIND.ROCK]: { color: [0.55, 0.58, 0.62], chips: 12, speed: 5.4, chip: [0.015, 0.04], puffs: 3, puff: [0.07, 0.14], gravity: -20, life: 0.45, spread: 0.3 },
+  [KIND.TREE]: { color: [0.36, 0.25, 0.16], chips: 12, speed: 4.4, chip: [0.015, 0.045], puffs: 2, puff: [0.05, 0.11], gravity: -19, life: 0.5, spread: 0.32 },
+  [KIND.WOOD]: { color: [0.40, 0.29, 0.19], chips: 12, speed: 4.4, chip: [0.015, 0.045], puffs: 2, puff: [0.05, 0.11], gravity: -19, life: 0.5, spread: 0.32 },
+  [KIND.WALL]: { color: [0.42, 0.31, 0.20], chips: 13, speed: 4.6, chip: [0.015, 0.045], puffs: 3, puff: [0.06, 0.13], gravity: -19, life: 0.5, spread: 0.32 },
+  [KIND.FLOOR]: { color: [0.42, 0.31, 0.20], chips: 11, speed: 4.0, chip: [0.015, 0.04], puffs: 2, puff: [0.05, 0.11], gravity: -19, life: 0.45, spread: 0.32 },
+  [KIND.ROOF]: { color: [0.72, 0.60, 0.32], chips: 13, speed: 4.0, chip: [0.02, 0.05], puffs: 3, puff: [0.07, 0.15], gravity: -16, life: 0.5, spread: 0.35 },
+  [KIND.THATCH]: { color: [0.74, 0.60, 0.30], chips: 14, speed: 4.0, chip: [0.02, 0.055], puffs: 3, puff: [0.07, 0.15], gravity: -15, life: 0.55, spread: 0.36 },
+  [KIND.HAY]: { color: [0.78, 0.66, 0.34], chips: 15, speed: 3.8, chip: [0.02, 0.06], puffs: 3, puff: [0.08, 0.16], gravity: -13, life: 0.6, spread: 0.38 },
+  [KIND.MUD]: { color: [0.46, 0.36, 0.24], chips: 12, speed: 4.2, chip: [0.02, 0.05], puffs: 3, puff: [0.06, 0.13], gravity: -19, life: 0.5, spread: 0.32 },
+  [KIND.FENCE]: { color: [0.45, 0.35, 0.22], chips: 10, speed: 4.4, chip: [0.015, 0.04], puffs: 2, puff: [0.05, 0.10], gravity: -19, life: 0.45, spread: 0.3 },
+  [KIND.PROP]: { color: [0.5, 0.5, 0.52], chips: 10, speed: 4.2, chip: [0.015, 0.04], puffs: 2, puff: [0.05, 0.11], gravity: -19, life: 0.45, spread: 0.32 }
 };
 
 class DebrisSystem {
@@ -74,6 +95,7 @@ class DebrisSystem {
     this.life = new Float32Array(max);
     this.maxLife = new Float32Array(max);
     this.gravity = new Float32Array(max);
+    this.drag = new Float32Array(max);
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -91,7 +113,7 @@ class DebrisSystem {
     };
 
     this.points = new THREE.Points(geo, new THREE.ShaderMaterial({
-      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uPixelScale: { value: 600 } }]),
       vertexShader: PARTICLE_VERT,
       fragmentShader: PARTICLE_FRAG,
       transparent: true,
@@ -107,36 +129,53 @@ class DebrisSystem {
     const s = SURFACE[kind] || SURFACE[KIND.TERRAIN];
     const nx = normal[0], ny = normal[1], nz = normal[2];
 
-    for (let i = 0; i < s.count; i++) {
-      const idx = this.head;
-      this.head = (this.head + 1) % this.max;
-
-      // Debris sprays back along the surface normal with a wide cone.
-      const rx = (Math.random() - 0.5) * 2 * s.spread;
-      const ry = (Math.random() - 0.5) * 2 * s.spread;
-      const rz = (Math.random() - 0.5) * 2 * s.spread;
-      const speed = s.speed * (0.35 + Math.random() * 0.9);
-
-      this.attr.pos.array[idx * 3] = point[0] + nx * 0.04;
-      this.attr.pos.array[idx * 3 + 1] = point[1] + ny * 0.04;
-      this.attr.pos.array[idx * 3 + 2] = point[2] + nz * 0.04;
-
-      this.vel[idx * 3] = (nx + rx) * speed;
-      this.vel[idx * 3 + 1] = (ny + ry) * speed + 0.9;
-      this.vel[idx * 3 + 2] = (nz + rz) * speed;
-
-      const life = s.life * (0.6 + Math.random() * 0.8);
-      this.life[idx] = life;
-      this.maxLife[idx] = life;
-      this.gravity[idx] = s.gravity;
-
-      this.attr.size.array[idx] = s.size * (0.5 + Math.random());
-      this.attr.alpha.array[idx] = 1;
-      const tint = 0.85 + Math.random() * 0.3;
-      this.attr.color.array[idx * 3] = s.color[0] * tint;
-      this.attr.color.array[idx * 3 + 1] = s.color[1] * tint;
-      this.attr.color.array[idx * 3 + 2] = s.color[2] * tint;
+    // The ground surface takes its colour from the map, so a round into snow throws
+    // up white and a round into a meadow throws up green.
+    let color = s.color;
+    if (kind === KIND.TERRAIN) {
+      const tint = mapInfo()?.environment?.impactColor;
+      if (tint) color = tint;
     }
+
+    const emit = (count, sizeRange, speedScale, gravity, life, lift, drag) => {
+      for (let i = 0; i < count; i++) {
+        const idx = this.head;
+        this.head = (this.head + 1) % this.max;
+        const i3 = idx * 3;
+
+        // Kicked up and back along the surface normal, in a fairly tight cone.
+        const rx = (Math.random() - 0.5) * 2 * s.spread;
+        const ry = (Math.random() - 0.5) * 2 * s.spread;
+        const rz = (Math.random() - 0.5) * 2 * s.spread;
+        const speed = s.speed * speedScale * (0.4 + Math.random() * 0.85);
+
+        this.attr.pos.array[i3] = point[0] + nx * 0.03;
+        this.attr.pos.array[i3 + 1] = point[1] + ny * 0.03;
+        this.attr.pos.array[i3 + 2] = point[2] + nz * 0.03;
+
+        this.vel[i3] = (nx + rx) * speed;
+        this.vel[i3 + 1] = (ny + ry) * speed + lift;
+        this.vel[i3 + 2] = (nz + rz) * speed;
+
+        const l = life * (0.65 + Math.random() * 0.7);
+        this.life[idx] = l;
+        this.maxLife[idx] = l;
+        this.gravity[idx] = gravity;
+        this.drag[idx] = drag;
+
+        this.attr.size.array[idx] = sizeRange[0] + Math.random() * (sizeRange[1] - sizeRange[0]);
+        this.attr.alpha.array[idx] = 1;
+        const tint = 0.82 + Math.random() * 0.34;
+        this.attr.color.array[i3] = color[0] * tint;
+        this.attr.color.array[i3 + 1] = color[1] * tint;
+        this.attr.color.array[i3 + 2] = color[2] * tint;
+      }
+    };
+
+    // hard debris: fast, heavy, short-lived
+    emit(s.chips, s.chip, 1.0, s.gravity, s.life, 1.4, 1.4);
+    // the dust it disturbs: slow, floaty, fades out where it is
+    emit(s.puffs, s.puff, 0.22, s.gravity * 0.12, s.life * 1.5, 0.5, 5.0);
   }
 
   update(dt) {
@@ -155,7 +194,7 @@ class DebrisSystem {
       const i3 = i * 3;
       this.vel[i3 + 1] += this.gravity[i] * dt;
       // air drag so puffs hang rather than flying like bullets
-      const drag = Math.exp(-2.6 * dt);
+      const drag = Math.exp(-this.drag[i] * dt);
       this.vel[i3] *= drag;
       this.vel[i3 + 1] *= drag;
       this.vel[i3 + 2] *= drag;
@@ -464,6 +503,13 @@ export class Effects {
     this.group.name = 'effects';
     this.group.add(this.debris.points, this.bullets.group, this.tracers.group, this.flashes.group, this.shells.group);
     scene.add(this.group);
+    this.bufferHeight = 800;
+    this.pixelScale = 600;
+  }
+
+  /** Drawing-buffer height in device pixels -- gl_PointSize is in device pixels. */
+  setViewport(bufferHeight) {
+    this.bufferHeight = bufferHeight || 800;
   }
 
   impact(point, normal, kind) {
@@ -491,6 +537,12 @@ export class Effects {
   }
 
   update(dt, camera) {
+    // Metres -> device pixels. Recomputed every frame because it depends on the
+    // camera FOV, which changes as you aim down sights.
+    this.pixelScale = this.bufferHeight / (2 * Math.tan((camera.fov * Math.PI) / 360));
+    const u = this.debris.points.material.uniforms;
+    if (u.uPixelScale) u.uPixelScale.value = this.pixelScale;
+
     this.debris.update(dt);
     this.bullets.update(dt);
     this.tracers.update(dt);

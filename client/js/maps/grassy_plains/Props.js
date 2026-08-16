@@ -8,7 +8,7 @@
 
 import * as THREE from '../../core/three.js';
 import { mergeGeometries, setVertexColor, gradientVertexColor, roughenGeometry } from '../../core/GeoUtils.js';
-import { PROPS, TREE_VARIANTS, fieldRuns } from '/shared/maps/grassy_plains/props.js';
+import { PROPS, TREE_VARIANTS } from '/shared/maps/grassy_plains/props.js';
 import { heightAt } from '/shared/maps/grassy_plains/terrain.js';
 import { makeRng } from '/shared/math/num.js';
 
@@ -191,46 +191,6 @@ export function createProps({ shadows = true } = {}) {
       mesh.setMatrixAt(i, dummy.matrix);
     });
     mesh.instanceMatrix.needsUpdate = true;
-    group.add(mesh);
-  }
-
-  // ---------------------------------------------------------------- fences
-  const fenceParts = [];
-  for (const f of PROPS.fields) {
-    for (const run of fieldRuns(f)) {
-      const len = run.to - run.from;
-      const posts = Math.max(2, Math.round(len / 2.2));
-      for (let i = 0; i <= posts; i++) {
-        const t = run.from + (len * i) / posts;
-        const px = run.axis === 'x' ? t : run.fixed;
-        const pz = run.axis === 'x' ? run.fixed : t;
-        const y = heightAt(px, pz);
-        const g = new THREE.BoxGeometry(0.11, f.height + 0.2, 0.11);
-        g.translate(px, y + (f.height + 0.2) / 2 - 0.1, pz);
-        setVertexColor(g, 0x6b563a);
-        fenceParts.push(g);
-      }
-      // two rails spanning the run, inside the collider footprint
-      for (const rh of [0.45, 0.92]) {
-        const midX = run.axis === 'x' ? (run.from + run.to) / 2 : run.fixed;
-        const midZ = run.axis === 'x' ? run.fixed : (run.from + run.to) / 2;
-        const y = heightAt(midX, midZ);
-        const g = run.axis === 'x'
-          ? new THREE.BoxGeometry(len, 0.075, 0.075)
-          : new THREE.BoxGeometry(0.075, 0.075, len);
-        g.translate(midX, y + rh, midZ);
-        setVertexColor(g, 0x7a6444);
-        fenceParts.push(g);
-      }
-    }
-  }
-  if (fenceParts.length) {
-    const mesh = new THREE.Mesh(mergeGeometries(fenceParts),
-      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
-    mesh.name = 'fences';
-    mesh.castShadow = shadows;
-    mesh.receiveShadow = true;
-    mesh.matrixAutoUpdate = false;
     group.add(mesh);
   }
 
