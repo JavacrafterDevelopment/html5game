@@ -1,0 +1,170 @@
+/* ============================================================
+   WHITEOUT - base layer: reset, tokens, canvas, overlays
+   ============================================================ */
+
+:root {
+  --bg: #0b1015;
+  --panel: #101820;
+  --panel-2: #16212b;
+  --line: #2a3a48;
+  --ice: #d9e9f7;
+  --ice-dim: #93aabd;
+  --muted: #63788a;
+  --accent: #7fb4dc;
+  --danger: #e8483c;
+  --warn: #e0a33c;
+  --ok: #6fbf73;
+
+  --font: "Bahnschrift", "DIN Alternate", "Arial Narrow", "Segoe UI", system-ui, sans-serif;
+  --mono: "Consolas", "SF Mono", "Menlo", monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ice);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  touch-action: none;
+}
+
+#viewport {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #97aec4;
+}
+
+.hidden { display: none !important; }
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  background:
+    radial-gradient(ellipse at 50% 35%, rgba(35, 55, 74, 0.55), rgba(6, 10, 14, 0.96) 70%),
+    linear-gradient(180deg, #0a1016, #060a0e);
+}
+
+/* subtle CRT-ish texture on menus */
+.scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  background: repeating-linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.022) 0px,
+    rgba(255, 255, 255, 0.022) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+.brand {
+  font-size: 54px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: #eef6ff;
+  text-shadow: 0 0 26px rgba(126, 178, 220, 0.35);
+}
+
+.brand-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------- loading ---- */
+.load-inner { text-align: center; width: min(460px, 82vw); }
+
+.load-bar {
+  margin: 30px 0 12px;
+  height: 3px;
+  background: #1b2833;
+  overflow: hidden;
+}
+
+.load-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), #eaf4ff);
+  transition: width 0.25s ease;
+}
+
+.load-status {
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------ disconnect ---- */
+.dc-inner {
+  text-align: center;
+  padding: 44px 56px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 2px solid var(--danger);
+}
+
+.dc-title {
+  font-size: 26px;
+  letter-spacing: 0.22em;
+  color: var(--danger);
+  margin-bottom: 10px;
+}
+
+.dc-sub {
+  font-size: 13px;
+  color: var(--ice-dim);
+  margin-bottom: 26px;
+  letter-spacing: 0.06em;
+}
+
+/* --------------------------------------------------- pause ---- */
+#pause-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(7, 11, 15, 0.7);
+  backdrop-filter: blur(3px);
+  cursor: pointer;
+}
+
+.ph-inner { text-align: center; }
+
+.ph-title {
+  font-size: 34px;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: #eef6ff;
+}
+
+.ph-sub {
+  margin-top: 10px;
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  color: var(--muted);
+}

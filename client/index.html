@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1015">
+<title>WHITEOUT — Hardcore FFA</title>
+<link rel="icon" href="/client/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/client/styles/main.css">
+<link rel="stylesheet" href="/client/styles/menu.css">
+<link rel="stylesheet" href="/client/styles/hud.css">
+</head>
+<body>
+
+<canvas id="viewport"></canvas>
+
+<!-- ============================ LOADING ============================ -->
+<div id="loading" class="overlay">
+  <div class="load-inner">
+    <div class="brand">WHITEOUT</div>
+    <div class="load-bar"><div class="load-fill" id="load-fill"></div></div>
+    <div class="load-status" id="load-status">Loading…</div>
+  </div>
+</div>
+
+<!-- ============================ JOIN =============================== -->
+<div id="join-screen" class="overlay hidden">
+  <div class="scanlines"></div>
+  <div class="join-panel">
+    <header class="join-head">
+      <div class="brand">WHITEOUT</div>
+      <div class="brand-sub">HARDCORE &nbsp;·&nbsp; FREE FOR ALL</div>
+    </header>
+
+    <div class="server-strip">
+      <span class="dot" id="conn-dot"></span>
+      <span id="server-map">—</span>
+      <span class="sep">/</span>
+      <span id="server-mode">—</span>
+      <span class="sep">/</span>
+      <span id="server-players">0 online</span>
+    </div>
+
+    <form id="join-form" autocomplete="off">
+      <label class="field-label" for="username">CALLSIGN</label>
+      <input id="username" name="username" type="text" maxlength="16" placeholder="Enter your name"
+             spellcheck="false" autocomplete="off" required>
+      <div class="field-hint" id="name-hint">Other players will see this name.</div>
+
+      <label class="field-label">PRIMARY WEAPON</label>
+      <div class="weapon-picker" id="weapon-picker"><!-- built by JoinScreen.js --></div>
+
+      <button type="submit" id="deploy-btn" class="deploy">DEPLOY</button>
+    </form>
+
+    <div class="warn-box">
+      <strong>HARDCORE RULES</strong>
+      <span>No hitmarkers. No kill confirmation. You find out how it went when you die.</span>
+    </div>
+
+    <div class="controls-grid">
+      <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move</span></div>
+      <div><kbd>SHIFT</kbd><span>Sprint</span></div>
+      <div><kbd>CTRL</kbd><span>Crouch</span></div>
+      <div><kbd>SPACE</kbd><span>Jump</span></div>
+      <div><kbd>LMB</kbd><span>Fire</span></div>
+      <div><kbd>RMB</kbd><span>Aim down sights</span></div>
+      <div><kbd>R</kbd><span>Reload</span></div>
+      <div><kbd>1</kbd><kbd>2</kbd><span>Switch weapon</span></div>
+      <div><kbd>TAB</kbd><span>Scoreboard</span></div>
+      <div><kbd>ESC</kbd><span>Release mouse</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ HUD ================================ -->
+<div id="hud" class="hidden">
+  <!-- crosshair -->
+  <div id="crosshair">
+    <span class="ch ch-t"></span><span class="ch ch-b"></span>
+    <span class="ch ch-l"></span><span class="ch ch-r"></span>
+    <span class="ch-dot"></span>
+  </div>
+
+  <div id="hit-vignette"></div>
+  <div id="damage-dir"></div>
+
+  <div class="hud-bl">
+    <div class="hp-row">
+      <div class="hp-label">HEALTH</div>
+      <div class="hp-bar"><div class="hp-fill" id="hp-fill"></div></div>
+      <div class="hp-num" id="hp-num">100</div>
+    </div>
+  </div>
+
+  <div class="hud-br">
+    <div class="wep-name" id="wep-name">AK-47</div>
+    <div class="ammo-row">
+      <span class="ammo-mag" id="ammo-mag">30</span>
+      <span class="ammo-sep">/</span>
+      <span class="ammo-res" id="ammo-res">150</span>
+    </div>
+    <div class="reload-hint hidden" id="reload-hint">RELOADING</div>
+    <div class="slot-row" id="slot-row"></div>
+  </div>
+
+  <div class="hud-tl">
+    <div class="match-line"><span id="match-mode">FREE FOR ALL</span></div>
+    <div class="match-sub">FIRST TO <span id="match-target">100</span></div>
+  </div>
+
+  <div class="hud-tr">
+    <div class="ping-line"><span id="ping-val">—</span> ms</div>
+  </div>
+
+  <div id="chat-log"></div>
+</div>
+
+<!-- ============================ SCOPE ============================== -->
+<div id="scope-shade" class="hidden"></div>
+
+<!-- ============================ SCOREBOARD ========================= -->
+<div id="scoreboard" class="hidden">
+  <div class="sb-panel">
+    <div class="sb-head">
+      <div class="sb-title">FREE FOR ALL</div>
+      <div class="sb-target">FIRST TO <span id="sb-target">100</span> KILLS</div>
+    </div>
+    <table class="sb-table">
+      <thead>
+        <tr><th class="c-rank">#</th><th class="c-name">CALLSIGN</th><th class="c-k">KILLS</th><th class="c-d">DEATHS</th><th class="c-r">K/D</th><th class="c-p">PING</th></tr>
+      </thead>
+      <tbody id="sb-body"></tbody>
+    </table>
+    <div class="sb-foot" id="sb-foot"></div>
+  </div>
+</div>
+
+<!-- ============================ DEATH ============================== -->
+<div id="death-screen" class="hidden">
+  <div class="death-wash"></div>
+  <div class="death-inner">
+    <div class="death-head">YOU WERE KILLED BY</div>
+    <div class="death-killer" id="death-killer">—</div>
+    <div class="death-detail">
+      <span id="death-weapon">—</span>
+      <span class="sep">·</span>
+      <span id="death-dist">—</span>
+      <span class="sep">·</span>
+      <span id="death-hs" class="hs hidden">HEADSHOT</span>
+      <span id="death-hp">—</span>
+    </div>
+    <div class="respawn-row">
+      <div class="respawn-label">RESPAWN IN</div>
+      <div class="respawn-num" id="respawn-num">5</div>
+      <div class="respawn-track"><div class="respawn-fill" id="respawn-fill"></div></div>
+    </div>
+    <div class="loadout-swap">
+      <div class="swap-label">NEXT LIFE</div>
+      <div class="swap-row" id="swap-row"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ MATCH OVER ========================= -->
+<div id="match-over" class="hidden">
+  <div class="mo-inner">
+    <div class="mo-label">MATCH OVER</div>
+    <div class="mo-winner" id="mo-winner">—</div>
+    <div class="mo-sub" id="mo-sub">—</div>
+    <div class="mo-next">Next match in <span id="mo-countdown">20</span>s</div>
+  </div>
+</div>
+
+<!-- ============================ MISC =============================== -->
+<div id="pause-hint" class="hidden">
+  <div class="ph-inner">
+    <div class="ph-title">PAUSED</div>
+    <div class="ph-sub">Click to resume</div>
+  </div>
+</div>
+
+<div id="disconnect" class="overlay hidden">
+  <div class="dc-inner">
+    <div class="dc-title">CONNECTION LOST</div>
+    <div class="dc-sub" id="dc-reason">The server closed the connection.</div>
+    <button id="dc-retry" class="deploy">RECONNECT</button>
+  </div>
+</div>
+
+<script type="module" src="/client/js/main.js"></script>
+</body>
+</html>

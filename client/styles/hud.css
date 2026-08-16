@@ -1,0 +1,431 @@
+/* ============================================================
+   WHITEOUT - in-game HUD, scoreboard, death screen, scope
+   Deliberately sparse: no hitmarkers, no kill feed, no killcam.
+   ============================================================ */
+
+#hud {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  font-family: var(--font);
+}
+
+/* ------------------------------------------------ crosshair ---- */
+#crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  --gap: 7px;
+  --len: 7px;
+  --thick: 2px;
+  opacity: 1;
+  transition: opacity 0.12s;
+}
+
+#crosshair.hidden-ads { opacity: 0; }
+
+/* A plain white crosshair vanishes against a snowfield, so every mark carries a
+   hard 1px dark ring plus a soft shadow. Readable on snow, sky and dark pines. */
+.ch {
+  position: absolute;
+  background: rgba(247, 252, 255, 0.96);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.82), 0 0 4px rgba(0, 0, 0, 0.55);
+}
+
+.ch-t { width: var(--thick); height: var(--len); left: calc(var(--thick) / -2); bottom: var(--gap); }
+.ch-b { width: var(--thick); height: var(--len); left: calc(var(--thick) / -2); top: var(--gap); }
+.ch-l { height: var(--thick); width: var(--len); top: calc(var(--thick) / -2); right: var(--gap); }
+.ch-r { height: var(--thick); width: var(--len); top: calc(var(--thick) / -2); left: var(--gap); }
+
+.ch-dot {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  left: -1px;
+  top: -1px;
+  background: rgba(247, 252, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
+}
+
+/* --------------------------------------------- damage feel ---- */
+#hit-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 42%, rgba(150, 12, 8, 0.72) 100%);
+  transition: opacity 0.35s ease-out;
+}
+
+/* Directional damage indicator: a red arc pointing at whoever shot you. */
+#damage-dir {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+}
+
+.dmg-arc {
+  position: absolute;
+  left: -110px;
+  top: -110px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: rgba(232, 72, 60, 0.85);
+  clip-path: polygon(20% 0, 80% 0, 62% 26%, 38% 26%);
+  animation: dmgfade 1.1s ease-out forwards;
+}
+
+@keyframes dmgfade {
+  0% { opacity: 0.95; transform: scale(0.92); }
+  100% { opacity: 0; transform: scale(1.06); }
+}
+
+/* ------------------------------------------------ hud boxes ---- */
+.hud-bl { position: absolute; left: 34px; bottom: 30px; }
+.hud-br { position: absolute; right: 36px; bottom: 28px; text-align: right; }
+.hud-tl { position: absolute; left: 34px; top: 26px; }
+.hud-tr { position: absolute; right: 36px; top: 26px; text-align: right; }
+
+.hp-row { display: flex; align-items: center; gap: 12px; }
+
+.hp-label {
+  font-size: 9px;
+  letter-spacing: 0.26em;
+  color: var(--muted);
+}
+
+.hp-bar {
+  width: 190px;
+  height: 6px;
+  background: rgba(10, 16, 21, 0.72);
+  border: 1px solid rgba(90, 118, 140, 0.4);
+}
+
+.hp-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #b9d4e9, #eaf5ff);
+  transition: width 0.16s ease-out, background 0.2s;
+}
+
+.hp-fill.hurt { background: linear-gradient(90deg, #d8a13e, #f0cc84); }
+.hp-fill.critical { background: linear-gradient(90deg, #c0392b, #e8483c); }
+
+.hp-num {
+  font-size: 22px;
+  min-width: 42px;
+  color: #eaf5ff;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+
+.wep-name {
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  color: var(--ice-dim);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+
+.ammo-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 5px;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
+}
+
+.ammo-mag { font-size: 40px; line-height: 1; color: #eef7ff; }
+.ammo-mag.low { color: var(--danger); }
+.ammo-sep { font-size: 20px; color: #47606f; }
+.ammo-res { font-size: 20px; color: var(--ice-dim); }
+
+.reload-hint {
+  margin-top: 4px;
+  font-size: 10px;
+  letter-spacing: 0.26em;
+  color: var(--warn);
+  animation: blink 0.7s steps(2, end) infinite;
+}
+
+@keyframes blink { 50% { opacity: 0.25; } }
+
+.slot-row {
+  margin-top: 9px;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.slot {
+  padding: 3px 8px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  background: rgba(10, 16, 21, 0.6);
+  border: 1px solid rgba(90, 118, 140, 0.28);
+}
+
+.slot.active { color: #eaf5ff; border-color: var(--accent); background: rgba(24, 44, 60, 0.7); }
+
+.match-line { font-size: 13px; letter-spacing: 0.24em; color: var(--ice-dim); }
+.match-sub { margin-top: 3px; font-size: 9px; letter-spacing: 0.2em; color: var(--muted); }
+.ping-line { font-size: 10px; letter-spacing: 0.14em; color: var(--muted); }
+
+/* ---------------------------------------------------- chat ---- */
+#chat-log {
+  position: absolute;
+  left: 34px;
+  bottom: 84px;
+  display: grid;
+  gap: 3px;
+  max-width: 420px;
+}
+
+.chat-line {
+  font-size: 12px;
+  color: var(--ice-dim);
+  text-shadow: 0 1px 4px #000;
+  animation: chatfade 9s forwards;
+}
+
+.chat-line b { color: var(--accent); font-weight: 600; }
+
+@keyframes chatfade { 0%, 78% { opacity: 1; } 100% { opacity: 0; } }
+
+/* --------------------------------------------------- scope ---- */
+/* Soft shading around the scope render, drawn under the WebGL lens. */
+#scope-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+  background: radial-gradient(circle at center, transparent 30%, rgba(0, 0, 0, 0.55) 46%, #000 52%);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+#scope-shade.on { opacity: 1; }
+
+/* ---------------------------------------------- scoreboard ---- */
+#scoreboard {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: rgba(6, 10, 14, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.sb-panel {
+  width: min(760px, 92vw);
+  background: linear-gradient(180deg, rgba(16, 24, 32, 0.97), rgba(11, 17, 23, 0.98));
+  border: 1px solid var(--line);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.6);
+}
+
+.sb-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sb-title { font-size: 17px; letter-spacing: 0.26em; color: #eaf5ff; }
+.sb-target { font-size: 10px; letter-spacing: 0.2em; color: var(--muted); }
+
+.sb-table { width: 100%; border-collapse: collapse; }
+
+.sb-table th {
+  padding: 9px 22px;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+  text-align: right;
+  border-bottom: 1px solid rgba(42, 58, 72, 0.6);
+}
+
+.sb-table th.c-name, .sb-table td.c-name { text-align: left; }
+.sb-table th.c-rank, .sb-table td.c-rank { text-align: left; width: 46px; }
+
+.sb-table td {
+  padding: 8px 22px;
+  font-size: 14px;
+  color: var(--ice-dim);
+  text-align: right;
+  border-bottom: 1px solid rgba(42, 58, 72, 0.22);
+}
+
+.sb-table td.c-name { color: #e2eefa; letter-spacing: 0.06em; }
+.sb-table td.c-k { color: #eaf5ff; font-size: 16px; }
+
+.sb-table tr.me td { background: rgba(127, 180, 220, 0.09); }
+.sb-table tr.me td.c-name { color: #ffffff; }
+.sb-table tr.me td.c-rank::after { content: " ◂"; color: var(--accent); }
+.sb-table tr.dead td { opacity: 0.5; }
+.sb-table tr.leader td.c-k { color: var(--warn); }
+
+.sb-foot {
+  padding: 11px 22px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+}
+
+/* -------------------------------------------- death screen ---- */
+#death-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.death-wash {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at center, rgba(60, 8, 6, 0.35), rgba(4, 7, 10, 0.9) 72%);
+  animation: deathin 0.5s ease-out;
+}
+
+@keyframes deathin { from { opacity: 0; } to { opacity: 1; } }
+
+.death-inner {
+  position: relative;
+  text-align: center;
+  transform: translateY(-16vh);
+  animation: deathin 0.45s ease-out;
+}
+
+.death-head {
+  font-size: 11px;
+  letter-spacing: 0.4em;
+  text-indent: 0.4em;
+  color: #96606a;
+}
+
+.death-killer {
+  margin-top: 8px;
+  font-size: 46px;
+  letter-spacing: 0.14em;
+  color: #ffffff;
+  text-shadow: 0 4px 30px rgba(232, 72, 60, 0.4);
+}
+
+.death-detail {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: var(--ice-dim);
+}
+
+.death-detail .sep { color: #4a3238; }
+.death-detail .hs { color: var(--danger); font-weight: 700; }
+
+.respawn-row { margin-top: 40px; }
+
+.respawn-label {
+  font-size: 9px;
+  letter-spacing: 0.36em;
+  color: var(--muted);
+}
+
+.respawn-num {
+  margin-top: 4px;
+  font-size: 34px;
+  color: #eaf5ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.respawn-track {
+  margin: 10px auto 0;
+  width: 220px;
+  height: 2px;
+  background: #23313c;
+}
+
+.respawn-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, var(--accent), #eaf5ff);
+}
+
+.loadout-swap { margin-top: 30px; pointer-events: auto; }
+
+.swap-label {
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: var(--muted);
+  margin-bottom: 9px;
+}
+
+.swap-row { display: flex; gap: 7px; justify-content: center; }
+
+.swap-btn {
+  padding: 8px 16px;
+  font-family: var(--font);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--ice-dim);
+  background: rgba(12, 19, 25, 0.85);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: all 0.14s;
+}
+
+.swap-btn:hover { border-color: #486478; color: #e6f1fb; }
+.swap-btn.active { border-color: var(--accent); color: #fff; background: rgba(24, 44, 60, 0.9); }
+
+/* Scoreboard sits below the death panel while you wait to respawn. */
+#death-screen.with-board .death-inner { transform: translateY(-30vh); }
+#scoreboard.respawn-mode { align-items: flex-end; padding-bottom: 6vh; background: none; backdrop-filter: none; }
+
+/* ---------------------------------------------- match over ---- */
+#match-over {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 9, 12, 0.86);
+  backdrop-filter: blur(4px);
+}
+
+.mo-inner { text-align: center; }
+
+.mo-label {
+  font-size: 12px;
+  letter-spacing: 0.44em;
+  text-indent: 0.44em;
+  color: var(--muted);
+}
+
+.mo-winner {
+  margin-top: 12px;
+  font-size: 56px;
+  letter-spacing: 0.12em;
+  color: #fff;
+  text-shadow: 0 0 40px rgba(127, 180, 220, 0.5);
+}
+
+.mo-sub { margin-top: 8px; font-size: 14px; letter-spacing: 0.2em; color: var(--ice-dim); }
+.mo-next { margin-top: 34px; font-size: 11px; letter-spacing: 0.2em; color: var(--muted); }
