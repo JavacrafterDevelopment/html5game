@@ -17,12 +17,15 @@
 import { NET, MATCH, PLAYER, WORLD } from '../../shared/config.js';
 import { C, S, MATCH_STATE, encode, decode, sanitizeName, DEATH_CAUSE } from '../../shared/protocol.js';
 import { getWeapon, isValidPrimary, damageAtRange, zoneMultiplier, HITZONE, PRIMARY_CHOICES, DEFAULT_SECONDARY } from '../../shared/weapons.js';
-import { raycastWorld, MAP_INFO, TERRAIN } from '../../shared/maps/snowy_forest/index.js';
+import { raycastWorld, mapDescriptor, setActiveMap, getActiveMapId, mapIds } from '../../shared/maps/active.js';
+import { resolveMapId } from '../../shared/maps/index.js';
 import { raySphere, rayCapsuleY } from '../../shared/math/trace.js';
 import { Player } from './Player.js';
 import { FreeForAll } from '../gamemodes/FreeForAll.js';
 
 const MAX_REWIND_MS = 320;
+/** How long clients get to rebuild the scene before play resumes without them. */
+const MAP_SWITCH_TIMEOUT_MS = 20000;
 
 export class GameServer {
   constructor(options = {}) {
@@ -35,6 +38,8 @@ export class GameServer {
     this.tickCount = 0;
     this.lastSnapshotAt = 0;
     this.resetAt = 0;
+    this.mapSwitch = null;
+    this.lastMapChangeAt = 0;
 
     this._tickTimer = null;
     this._pingTimer = null;
@@ -93,6 +98,10 @@ export class GameServer {
     this.connections.delete(conn);
     if (!player) return;
     this.players.delete(player.id);
+    if (this.mapSwitch) {
+      this.mapSwitch.pending.delete(player.id);
+      if (this.mapSwitch.pending.size === 0) this.finishMapChange();
+    }
     this.broadcast(S.PLAYER_LEAVE, { id: player.id });
     this.broadcastScores();
     console.log(`  - ${player.name} left (${this.players.size} online)`);
@@ -126,6 +135,7 @@ export class GameServer {
       case C.SWITCH: this.handleSwitch(player, msg); break;
       case C.LOADOUT: this.handleLoadout(player, msg); break;
       case C.CHAT: this.handleChat(player, msg); break;
+      case C.MAP_READY: this.handleMapReady(player); break;
       case C.PING: this.send(player, S.PONG, { t: msg.t, s: Date.now() }); break;
       default: break;
     }
@@ -156,13 +166,7 @@ export class GameServer {
     this.send(player, S.WELCOME, {
       id: player.id,
       name: player.name,
-      map: {
-        id: MAP_INFO.id,
-        name: MAP_INFO.name,
-        description: MAP_INFO.description,
-        seed: TERRAIN.seed,
-        environment: MAP_INFO.environment
-      },
+      map: mapDescriptor(),
       match: this.mode.serialize(),
       spawn: { pos: player.pos, yaw: player.yaw },
       loadout: { primary: player.primary, secondary: player.secondary },
@@ -216,7 +220,127 @@ export class GameServer {
   handleChat(player, msg) {
     const text = sanitizeName(String(msg.text || '')).slice(0, 90);
     if (!text) return;
+    if (text.startsWith('/')) {
+      this.handleCommand(player, text);
+      return;
+    }
     this.broadcast(S.CHAT, { id: player.id, name: player.name, text });
+  }
+
+  /** Slash commands typed into chat. */
+  handleCommand(player, text) {
+    const [rawCmd, ...args] = text.slice(1).split(/\s+/);
+    const cmd = rawCmd.toLowerCase();
+
+    switch (cmd) {
+      case 'map': {
+        if (!args.length) {
+          this.send(player, S.NOTICE, {
+            text: `Current map: ${mapDescriptor().name}. Try /map ${mapIds().join(' or /map ')}`
+          });
+          return;
+        }
+        const target = resolveMapId(args[0]);
+        if (!target) {
+          this.send(player, S.NOTICE, { text: `Unknown map "${args[0]}". Available: ${mapIds().join(', ')}` });
+          return;
+        }
+        if (target === getActiveMapId()) {
+          this.send(player, S.NOTICE, { text: `Already playing ${mapDescriptor().name}.` });
+          return;
+        }
+        if (this.mapSwitch) {
+          this.send(player, S.NOTICE, { text: 'A map change is already in progress.' });
+          return;
+        }
+        const now = Date.now();
+        if (now - this.lastMapChangeAt < 15000) {
+          const wait = Math.ceil((15000 - (now - this.lastMapChangeAt)) / 1000);
+          this.send(player, S.NOTICE, { text: `Map was just changed. Wait ${wait}s.` });
+          return;
+        }
+        this.changeMap(target, player);
+        return;
+      }
+      case 'maps':
+        this.send(player, S.NOTICE, { text: 'Maps: ' + mapIds().join(', ') });
+        return;
+      case 'help':
+        this.send(player, S.NOTICE, { text: 'Commands: /map <name>, /maps, /help' });
+        return;
+      default:
+        this.send(player, S.NOTICE, { text: `Unknown command "/${cmd}". Try /help` });
+    }
+  }
+
+  /**
+   * Move the entire server to another map.
+   *
+   * Everything about where the ground is and what stops a bullet comes from the
+   * active map module, so flipping it here changes the server's physics instantly.
+   * Clients need time to build the new scene, so play is suspended until they report
+   * back (or a deadline passes), then everyone respawns fresh.
+   */
+  changeMap(mapId, requester = null) {
+    if (!setActiveMap(mapId)) return false;
+
+    const descriptor = mapDescriptor();
+    this.lastMapChangeAt = Date.now();
+    this.mapSwitch = {
+      deadline: Date.now() + MAP_SWITCH_TIMEOUT_MS,
+      pending: new Set(this.players.keys())
+    };
+
+    // Nobody is alive or shootable while the world is being rebuilt.
+    for (const p of this.players.values()) {
+      p.alive = false;
+      p.respawnAt = 0;
+      p.history.length = 0;
+    }
+
+    this.broadcast(S.MAP_CHANGE, {
+      map: descriptor,
+      by: requester ? requester.name : 'the server',
+      timeoutMs: MAP_SWITCH_TIMEOUT_MS
+    });
+    console.log(`  * map -> ${descriptor.name}${requester ? ` (by ${requester.name})` : ''}`);
+    return true;
+  }
+
+  handleMapReady(player) {
+    if (!this.mapSwitch) {
+      // No switch in progress: this is someone who joined while the server was
+      // already on a non-default map and has just finished building it. They put
+      // themselves on hold to do that, so give them a fresh spawn to come back on.
+      const spawn = this.mode.pickSpawn(player, this.playerList);
+      player.spawn(spawn);
+      player.respawnAt = 0;
+      this.send(player, S.RESPAWN, {
+        pos: player.pos, yaw: player.yaw, hp: player.hp,
+        weapon: player.weaponId, ammo: this.ammoFor(player)
+      });
+      return;
+    }
+    this.mapSwitch.pending.delete(player.id);
+    if (this.mapSwitch.pending.size === 0) this.finishMapChange();
+  }
+
+  finishMapChange() {
+    if (!this.mapSwitch) return;
+    this.mapSwitch = null;
+    this.mode.recentSpawns.length = 0;
+
+    for (const p of this.players.values()) {
+      const spawn = this.mode.pickSpawn(p, this.playerList);
+      p.spawn(spawn);
+      p.respawnAt = 0;
+      this.send(p, S.RESPAWN, {
+        pos: p.pos, yaw: p.yaw, hp: p.hp,
+        weapon: p.weaponId, ammo: this.ammoFor(p)
+      });
+    }
+    this.broadcastScores();
+    console.log(`  * map change complete (${this.players.size} players respawned)`);
   }
 
   // ------------------------------------------------------------ combat
@@ -224,6 +348,7 @@ export class GameServer {
   handleFire(player, msg) {
     const now = Date.now();
     if (this.mode.state !== MATCH_STATE.LIVE) return;
+    if (this.mapSwitch) return;   // world is being rebuilt; nobody can shoot
 
     const weaponId = typeof msg.wp === 'string' ? msg.wp : player.weaponId;
     const reason = player.canFire(weaponId, now);
@@ -331,6 +456,16 @@ export class GameServer {
     victim.lastDamageAt = Date.now();
     victim.lastAttackerId = attacker ? attacker.id : 0;
 
+    // A wound is a world event: everyone can see blood, nobody is told whose it is
+    // or who caused it. This is the one concession to visible hit feedback, and it
+    // carries no identities so it still cannot be turned into a hitmarker.
+    this.broadcast(S.BLOOD, {
+      p: [r2(victim.pos[0]), r2(hitY ?? victim.pos[1] + 1.1), r2(victim.pos[2])],
+      d: dir ? [r3(dir[0]), r3(dir[1]), r3(dir[2])] : [0, 0, 1],
+      a: Math.min(1, amount / 60),
+      h: zone === HITZONE.HEAD ? 1 : 0
+    });
+
     if (victim.hp > 0) return;
 
     this.killPlayer(victim, attacker, weapon, zone, distance, dir, hitY);
@@ -388,6 +523,8 @@ export class GameServer {
   resetMatch() {
     this.mode.reset(this.playerList);
     this.resetAt = 0;
+    this.mapSwitch = null;
+    this.lastMapChangeAt = 0;
     this.broadcast(S.MATCH_RESET, { match: this.mode.serialize() });
     for (const p of this.players.values()) {
       const spawn = this.mode.pickSpawn(p, this.playerList);
@@ -413,7 +550,7 @@ export class GameServer {
     for (const p of this.players.values()) {
       p.updateReload(now);
 
-      if (!p.alive && p.respawnAt && now >= p.respawnAt && this.mode.state === MATCH_STATE.LIVE) {
+      if (!this.mapSwitch && !p.alive && p.respawnAt && now >= p.respawnAt && this.mode.state === MATCH_STATE.LIVE) {
         const spawn = this.mode.pickSpawn(p, this.playerList);
         p.spawn(spawn);
         p.respawnAt = 0;
@@ -428,6 +565,9 @@ export class GameServer {
     }
 
     if (this.resetAt && now >= this.resetAt) this.resetMatch();
+
+    // A client that never reports back must not hold the whole server hostage.
+    if (this.mapSwitch && now >= this.mapSwitch.deadline) this.finishMapChange();
 
     const snapshotInterval = 1000 / NET.SNAPSHOT_RATE;
     if (now - this.lastSnapshotAt >= snapshotInterval) {
@@ -493,7 +633,7 @@ export class GameServer {
 
   info() {
     return {
-      map: MAP_INFO.name,
+      map: mapDescriptor().name,
       mode: this.mode.name,
       state: this.mode.state,
       target: this.mode.killTarget,

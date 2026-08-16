@@ -50,6 +50,13 @@ export const MOVE = {
   AIR_FRICTION: 0.2,
   GRAVITY: 23,
   JUMP_VELOCITY: 7.3,
+  /**
+   * Ground steeper than this gives way under you and you slide back down.
+   * This is how the snowy map's mountain ring is impassable without a fence --
+   * shared so tools/test-maps.mjs can prove the boundary really holds.
+   */
+  SLIDE_SLOPE: 0.44,
+  SLIDE_ACCEL: 46,
   // View
   FOV: 78,
   MOUSE_SENS: 0.0022

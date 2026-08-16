@@ -5,6 +5,14 @@
  * so a 1000 Hz mouse is not throttled by the render rate.
  */
 
+/** True when a text field owns the keyboard. */
+function isTyping() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
+}
+
 export class Input {
   constructor(canvas) {
     this.canvas = canvas;
@@ -67,6 +75,10 @@ export class Input {
     }, { passive: true });
 
     window.addEventListener('keydown', (e) => {
+      // While a text field has focus (chat, the callsign box) the keyboard belongs
+      // to that field. Swallowing these here stops "wasd" in a chat message from
+      // also queuing movement for the moment the mouse is recaptured.
+      if (isTyping()) return;
       if (e.repeat) {
         // still swallow browser shortcuts while playing
         if (this.locked && e.code === 'Tab') e.preventDefault();

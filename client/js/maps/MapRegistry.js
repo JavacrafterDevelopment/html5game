@@ -1,12 +1,14 @@
 /**
- * Client-side map registry. The server tells us which map id to load in its
- * welcome message; this resolves that id to a renderer.
+ * Client-side map registry. The server names a map id in its welcome message and in
+ * map-change broadcasts; this resolves that id to a renderer.
  */
 
 import { SnowyForestMap } from './snowy_forest/SnowyForestMap.js';
+import { GrassyPlainsMap } from './grassy_plains/GrassyPlainsMap.js';
 
 const MAPS = {
-  snowy_forest: SnowyForestMap
+  snowy_forest: SnowyForestMap,
+  grassy_plains: GrassyPlainsMap
 };
 
 export function createMap(id, scene, options) {

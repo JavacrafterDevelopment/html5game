@@ -263,12 +263,17 @@ export class Player {
 
   /** Compact form sent to every other client each snapshot. */
   toSnapshot() {
+    // The bleeding flag is added by the server, not reported by the client, so a
+    // modified client cannot hide the fact that it is wounded.
+    let bits = this.stateBits;
+    if (this.alive && this.hp < PLAYER.MAX_HP * 0.62) bits |= STATE_BITS.BLEEDING;
+
     return {
       i: this.id,
       p: [round2(this.pos[0]), round2(this.pos[1]), round2(this.pos[2])],
       y: round3(this.yaw),
       t: round3(this.pitch),
-      s: this.stateBits,
+      s: bits,
       w: this.weaponId,
       a: this.alive ? 1 : 0
     };

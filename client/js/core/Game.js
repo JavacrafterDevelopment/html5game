@@ -20,15 +20,17 @@ import { ViewModel } from '../weapons/ViewModel.js';
 import { WeaponController } from '../weapons/WeaponController.js';
 import { Scope } from '../weapons/Scope.js';
 import { Effects } from '../effects/Impacts.js';
+import { BloodSystem } from '../effects/Blood.js';
 import { AudioEngine } from '../audio/AudioEngine.js';
 import { createMap } from '../maps/MapRegistry.js';
 import { HUD } from '../ui/HUD.js';
 import { Scoreboard } from '../ui/Scoreboard.js';
 import { DeathScreen, MatchOverScreen } from '../ui/DeathScreen.js';
 import { C, S, STATE_BITS } from '/shared/protocol.js';
+import { DEFAULT_MAP } from '/shared/maps/index.js';
 import { NET, MATCH, MOVE, WORLD } from '/shared/config.js';
 import { getWeapon, isValidPrimary, DEFAULT_SECONDARY } from '/shared/weapons.js';
-import { raycastWorld } from '/shared/maps/snowy_forest/collision.js';
+import { raycastWorld, setActiveMap, getActiveMapId } from '/shared/maps/active.js';
 import { clamp, damp } from '/shared/math/num.js';
 
 const LEFT_MOUSE = 0, RIGHT_MOUSE = 2;
@@ -71,7 +73,8 @@ export class Game {
     // The view model is parented to the camera, so the camera must be in the graph.
     this.scene.add(this.camera);
 
-    this.map = createMap('snowy_forest', this.scene, { quality: this.settings.resolvedQuality });
+    this.mapId = DEFAULT_MAP;
+    this.map = createMap(this.mapId, this.scene, { quality: this.settings.resolvedQuality });
     await this.map.build((f, label) => onProgress?.(0.05 + f * 0.8, label));
 
     onProgress?.(0.88, 'Assembling weapons');
@@ -89,6 +92,7 @@ export class Game {
     this.scope.setSize(window.innerWidth, window.innerHeight);
 
     this.effects = new Effects(this.scene);
+    this.blood = new BloodSystem(this.scene);
     this.ragdolls = new RagdollManager(this.scene, 20);
     this.audio = new AudioEngine();
 
@@ -160,7 +164,10 @@ export class Game {
 
     this.input.on('lockChange', (locked) => {
       this.paused = !locked;
-      this.pauseHint.classList.toggle('hidden', locked || !this.running || this.matchOver);
+      // Typing in chat, waiting to respawn and the post-match screen all release the
+      // mouse on purpose -- none of them are "paused", so none should show the hint.
+      const intentional = this.chatOpen || this.matchOver || !this.alive;
+      this.pauseHint.classList.toggle('hidden', locked || !this.running || intentional);
       if (locked) this.audio.resume();
     });
 
@@ -202,17 +209,25 @@ export class Game {
   }
 
   _openChat() {
-    if (!this.running) return;
+    if (!this.running || this.chatOpen) return;
+    // chatOpen must be set BEFORE releasing the mouse: dropping pointer lock fires
+    // lockChange, and that handler decides whether to show the pause overlay.
+    // Without this ordering, opening chat pops up "PAUSED / click to resume" too.
     this.chatOpen = true;
     this.chatWrap.style.display = 'block';
+    this.pauseHint.classList.add('hidden');
     this.input.releaseLock();
+    this.input.keys.clear();
     setTimeout(() => this.chatInput.focus(), 20);
   }
 
   _closeChat() {
+    if (!this.chatOpen) return;
     this.chatOpen = false;
     this.chatWrap.style.display = 'none';
     this.chatInput.blur();
+    // Anything typed must not leak into movement when the mouse is recaptured.
+    this.input.keys.clear();
     if (!this.matchOver) this.input.requestLock();
   }
 
@@ -273,6 +288,9 @@ export class Game {
     net.on(S.MATCH_OVER, (msg) => this._onMatchOver(msg));
     net.on(S.MATCH_RESET, () => this._onMatchReset());
     net.on(S.CHAT, (msg) => this.hud.addChat(msg.name, msg.text));
+    net.on(S.NOTICE, (msg) => this.hud.addChat('SERVER', msg.text));
+    net.on(S.BLOOD, (msg) => this.blood.mist(msg.p, msg.d, msg.a ?? 1));
+    net.on(S.MAP_CHANGE, (msg) => this._onMapChange(msg));
     net.on(S.ERROR, (msg) => this.onFatalError?.(msg.message || 'Server error'));
     net.on('__close', (info) => {
       if (!info.byUs) this.onDisconnect?.(info);
@@ -283,6 +301,11 @@ export class Game {
     this.selfId = msg.id;
     this.selfName = msg.name;
     this.killTarget = msg.config?.killTarget ?? MATCH.KILL_TARGET;
+
+    // The server may already be playing something other than the default map.
+    if (msg.map && msg.map.id !== this.mapId) {
+      this._loadMap(msg.map, `Now playing ${msg.map.name}`);
+    }
 
     this.scoreboard.setSelf(this.selfId);
     this.scoreboard.setTarget(this.killTarget);
@@ -327,7 +350,14 @@ export class Game {
     for (const s of msg.ps) {
       let rp = this.remotes.get(s.i);
       if (!rp) rp = this._addRemote(s.i, 'Operator');
-      if (rp) rp.applySnapshot(t, s);
+      if (!rp) continue;
+      rp.applySnapshot(t, s);
+
+      // Wounded players leave a trail. The bleeding flag is set by the server, so a
+      // modified client cannot stop itself dripping.
+      if (s.a === 1 && (s.s & STATE_BITS.BLEEDING) && (s.s & STATE_BITS.MOVING)) {
+        this.blood.dripFrom(s.i, s.p);
+      }
     }
 
     const self = msg.self;
@@ -338,6 +368,77 @@ export class Game {
       }
       this._lastSelfHp = self.hp;
       this.weapons.syncAmmo(self.mag, self.reserve, self.reloading);
+
+      // ...and so do you, under your own feet.
+      if (self.alive && self.hp < 62 && this.player.speed > 1.2) {
+        this.blood.dripFrom(this.selfId, this.player.pos);
+      }
+    }
+  }
+
+  /**
+   * The server moved everyone to another map. Tear the world down, build the new
+   * one, and report back so play can resume.
+   */
+  async _onMapChange(msg) {
+    await this._loadMap(msg.map, `${msg.by} changed the map to ${msg.map.name}`);
+  }
+
+  /**
+   * Swap the whole world to another map.
+   *
+   * Used both when somebody types /map AND when joining a server that is already
+   * playing something other than the default -- without the second case, a late
+   * joiner would render the snowy map while standing on the grassy one.
+   */
+  async _loadMap(mapInfo, announcement = null) {
+    if (this.rebuilding) return;
+    if (mapInfo.id === this.mapId) return;
+    this.rebuilding = true;
+    this.mapId = mapInfo.id;
+    const msg = { map: mapInfo };
+
+    const loading = document.getElementById('loading');
+    const fill = document.getElementById('load-fill');
+    const status = document.getElementById('load-status');
+
+    try {
+      this.alive = false;
+      this.weapons.enabled = false;
+      this.viewModel.setVisible(false);
+      this.deathCam = null;
+      this.deathScreen.hide();
+      this.input.releaseLock();
+      this.pauseHint.classList.add('hidden');
+
+      // everything that belonged to the old world
+      this.ragdolls.clear();
+      this.blood.clear();
+      for (const rp of this.remotes.values()) rp.setVisible(false);
+
+      if (announcement) this.hud.addChat('SERVER', announcement);
+
+      loading.classList.remove('hidden');
+      fill.style.width = '0%';
+      status.textContent = 'Loading ' + msg.map.name;
+
+      // Physics first: the shared collision layer must agree with what we draw.
+      setActiveMap(msg.map.id);
+      this.map.dispose();
+      this.map = createMap(msg.map.id, this.scene, { quality: this.settings.resolvedQuality });
+      await this.map.build((f, label) => {
+        fill.style.width = Math.round(f * 100) + '%';
+        if (label) status.textContent = label;
+      });
+    } catch (err) {
+      console.error('map rebuild failed', err);
+      status.textContent = 'Map failed to load: ' + (err?.message || err);
+    } finally {
+      // Always report back, even after a failure. A client that stays silent holds
+      // the whole server on the switch deadline, which punishes everybody else.
+      loading.classList.add('hidden');
+      this.rebuilding = false;
+      this.net.send(C.MAP_READY, {});
     }
   }
 
@@ -357,6 +458,7 @@ export class Game {
     });
 
     this.audio.gunshot(w.audio, null);
+    this.map.onGunshot?.(shot.origin);
 
     // muzzle flash + small yellow bullet + world impact on arrival
     const muzzle = shot.muzzle;
@@ -410,6 +512,7 @@ export class Game {
 
     const muzzlePos = rp ? rp.muzzleWorldPosition(this._v1).toArray() : origin;
     this.audio.gunshot(w.audio, muzzlePos);
+    this.map.onGunshot?.(muzzlePos);
     this.effects.muzzleFlash(muzzlePos, w.id === 'm700' ? 1.4 : 1.05, this.camera);
 
     const hit = raycastWorld(origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], WORLD.MAX_BULLET_RANGE);
@@ -446,6 +549,8 @@ export class Game {
     const rp = this.remotes.get(msg.id);
     if (!rp) return;
     const soldier = rp.detachForRagdoll();
+    this.blood.pool([rp.renderPos.x, rp.renderPos.y, rp.renderPos.z], 1.1 + Math.random() * 0.5);
+    this.blood.forget(msg.id);
     this.ragdolls.spawn(soldier, {
       impulse: msg.dir,
       hitY: msg.hitY,
@@ -480,6 +585,7 @@ export class Game {
     soldier.group.rotation.y = this.player.yaw + Math.PI;
     soldier.group.updateMatrixWorld(true);
 
+    this.blood.pool([this.player.pos[0], this.player.pos[1], this.player.pos[2]], 1.2 + Math.random() * 0.5);
     const rag = this.ragdolls.spawn(soldier, {
       impulse: msg.dir,
       hitY: msg.hitY,
@@ -520,6 +626,9 @@ export class Game {
     this.viewModel.setVisible(true);
     this.deathCam = null;
     this._lastSelfHp = 100;
+    this.rebuilding = false;
+    for (const rp of this.remotes.values()) rp.setVisible(true);
+    this.blood.forget(this.selfId);
 
     this.hud.clearDamage();
     this.hud.setHealth(msg.hp ?? 100);
@@ -651,7 +760,8 @@ export class Game {
 
     this.ragdolls.update(dt);
     this.effects.update(dt, this.camera);
-    this.map.update(dt, this.camera);
+    this.blood.update(dt);
+    if (!this.rebuilding) this.map.update(dt, this.camera);
     this.audio.updateListener(this.camera);
 
     // ---------------------------------------------------------- death cam

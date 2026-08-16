@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const suites = ['check.mjs', 'test-handshake.mjs', 'test-combat.mjs'];
+const suites = ['check.mjs', 'test-handshake.mjs', 'test-maps.mjs', 'test-combat.mjs'];
 
 let failed = 0;
 for (const suite of suites) {

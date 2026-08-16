@@ -5,8 +5,8 @@
 
 export { TERRAIN, heightAt, normalAt, slopeAt, isWalkable, CABIN_SITE, CABIN_BASE_Y } from './terrain.js';
 export { CABIN, CABIN_BOXES, CABIN_PARTS, WINDOWS } from './cabin.js';
-export { PROPS, SPAWN_POINTS, TREE_VARIANTS } from './props.js';
-export { collideCapsule, raycastWorld, raycastTerrain, isBlocked, KIND, COLLIDER_COUNT } from './collision.js';
+export { PROPS, TREE_VARIANTS } from './props.js';
+export { collideCapsule, raycastWorld, raycastTerrain, isBlocked, KIND, COLLIDER_COUNT, COLLIDERS, SPAWN_POINTS } from './collision.js';
 
 export const MAP_INFO = {
   id: 'snowy_forest',

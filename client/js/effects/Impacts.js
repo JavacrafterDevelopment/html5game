@@ -8,8 +8,7 @@
  */
 
 import * as THREE from '../core/three.js';
-import { KIND } from '/shared/maps/snowy_forest/collision.js';
-import { heightAt } from '/shared/maps/snowy_forest/terrain.js';
+import { KIND, heightAt } from '/shared/maps/active.js';
 
 // ------------------------------------------------------------ debris particles
 // A ShaderMaterial with `fog: true` MUST also carry the fog uniforms and shader

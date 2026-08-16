@@ -18,7 +18,8 @@ export const C = {
   SWITCH: 'switch',        // { wp }
   LOADOUT: 'loadout',      // { primary }  (applies on next respawn)
   PING: 'ping',            // { t }
-  CHAT: 'chat'             // { text }
+  CHAT: 'chat',            // { text } -- also carries slash commands like /map grass
+  MAP_READY: 'mapready'    // client finished rebuilding after a map change
 };
 
 // ---- server -> client ----
@@ -36,6 +37,9 @@ export const S = {
   MATCH_RESET: 'mreset',   // {}
   SHOT_FIRED: 'shot',      // { id, o, d, wp } -- so others hear/see it. Never sent to the shooter.
   PONG: 'pong',            // { t }
+  BLOOD: 'blood',          // { p, d, a } -- a wound, in the world. No shooter, no victim id.
+  MAP_CHANGE: 'mapchange', // { map, by, inMs } -- everyone rebuilds and respawns
+  NOTICE: 'notice',        // { text } -- server message in the chat log
   CHAT: 'chat',            // { id, name, text }
   ERROR: 'error'           // { code, message }
 };
@@ -48,7 +52,9 @@ export const STATE_BITS = {
   AIRBORNE: 1 << 3,
   MOVING: 1 << 4,
   FIRING: 1 << 5,
-  RELOADING: 1 << 6
+  RELOADING: 1 << 6,
+  /** Set by the SERVER, not the client: this player is wounded and leaving a trail. */
+  BLEEDING: 1 << 7
 };
 
 export const MATCH_STATE = {

@@ -186,4 +186,5 @@ function generateSpawns() {
   return out;
 }
 
-export const SPAWN_POINTS = generateSpawns();
+/** Candidates only. collision.js filters these against real geometry. */
+export const SPAWN_CANDIDATES = generateSpawns();

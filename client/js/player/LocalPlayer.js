@@ -12,11 +12,10 @@
 
 import * as THREE from '../core/three.js';
 import { PLAYER, MOVE, WORLD } from '/shared/config.js';
-import { collideCapsule } from '/shared/maps/snowy_forest/collision.js';
-import { heightAt, slopeAt, normalAt } from '/shared/maps/snowy_forest/terrain.js';
+import { collideCapsule, heightAt, slopeAt, normalAt } from '/shared/maps/active.js';
 import { clamp, damp, lerp } from '/shared/math/num.js';
 
-const SLIDE_SLOPE = 0.44;   // above this the snow gives way under you
+const SLIDE_SLOPE = MOVE.SLIDE_SLOPE;   // above this the ground gives way under you
 
 export class LocalPlayer {
   constructor(camera) {
@@ -164,7 +163,21 @@ export class LocalPlayer {
       const slope = slopeAt(this.pos[0], this.pos[2], 0.9);
       if (slope > SLIDE_SLOPE) {
         const n = normalAt(this.pos[0], this.pos[2], 0.9);
-        const push = (slope - SLIDE_SLOPE) * 46 * dt;
+        // The surface normal's horizontal part points downhill.
+        const dl = Math.hypot(n[0], n[2]) || 1;
+        const ux = -n[0] / dl, uz = -n[2] / dl;      // uphill
+
+        // Kill the uphill component of your velocity: on ground this steep there is
+        // simply no traction. Merely adding a downhill push is not enough -- the
+        // movement code drives velocity back to full speed every frame and you walk
+        // up the mountain anyway, straight into the numeric clamp.
+        const along = this.vel.x * ux + this.vel.z * uz;
+        if (along > 0) {
+          this.vel.x -= ux * along;
+          this.vel.z -= uz * along;
+        }
+
+        const push = (slope - SLIDE_SLOPE) * MOVE.SLIDE_ACCEL * dt;
         this.vel.x += n[0] * push;
         this.vel.z += n[2] * push;
       }

@@ -37,7 +37,19 @@ Free For All, first to 100 kills. Two rifle rounds kill. Headshots kill.
 
 You get **no hitmarkers and no kill notifications**. You find out how the fight went
 when you die — then the game tells you who killed you, with what, from how far, and
-how much health they had left.
+how much health they had left. You will see blood when you hit someone, but never a
+marker, a number or a confirmed kill.
+
+## Maps
+
+Two maps, switchable mid-match by anyone, from chat:
+
+```
+/map snow      Whiteout Ridge — frozen pine basin, mountains, a hunting cabin
+/map grass     Hollowmere — summer farmland, huts, hedgerows, sheep
+```
+
+The whole server moves together: everyone rebuilds and respawns.
 
 ## Controls
 

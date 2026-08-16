@@ -66,7 +66,7 @@ level rather than by politely not drawing things.
 
 | While you are alive | What the game tells you |
 |---|---|
-| You hit someone | **Nothing.** No hitmarker, no sound, no flash. |
+| You hit someone | **Blood, in the world.** No hitmarker, no sound, no numbers. |
 | You killed someone | **Nothing.** No notification, no kill feed, no score popup. |
 | Someone died nearby | You see a body drop. Not who dropped it. |
 | You take damage | Red vignette + directional arc + your health bar. |
@@ -74,6 +74,13 @@ level rather than by politely not drawing things.
 
 Two shots from a rifle kill. Every rifle headshot kills. The M700 kills with one
 round anywhere it lands. You will lose fights you thought you were winning.
+
+Blood is the one deliberate exception, and it is a **world** effect rather than a UI
+one: it appears on the victim, visible to everyone including bystanders, exactly
+like a real wound. The `blood` message carries a position and a direction and no
+identities whatsoever, so it still cannot become a hitmarker or a kill
+confirmation. You can see that somebody is bleeding. You still cannot tell whether
+they are about to drop.
 
 **How it's enforced:** [`shared/protocol.js`](shared/protocol.js) contains no
 "you hit" or "you killed" message at all. The server's `resolveShot()` returns
@@ -119,13 +126,22 @@ html5game/
 │   │   ├── num.js               seeded RNG, value noise, fbm, lerp/damp
 │   │   └── trace.js             ray vs box / sphere / cylinder / capsule
 │   └── maps/
-│       ├── index.js             map registry
-│       └── snowy_forest/
+│       ├── index.js             map registry + /map name aliases
+│       ├── active.js            THE ACTIVE MAP — everything routes through here
+│       ├── kinds.js             surface kinds (drives impact effects)
+│       ├── ColliderWorld.js     shared capsule solver + ray tracing
+│       ├── snowy_forest/
+│       │   ├── index.js         map bundle
+│       │   ├── terrain.js       analytic heightfield  ← ground truth for "where is the ground"
+│       │   ├── props.js         deterministic tree/rock/log scatter + spawn candidates
+│       │   ├── cabin.js         cabin geometry as collision boxes
+│       │   └── collision.js     collider list + validated spawn points
+│       └── grassy_plains/
 │           ├── index.js         map bundle
-│           ├── terrain.js       analytic heightfield  ← the ground truth for "where is the ground"
-│           ├── props.js         deterministic tree/rock/log scatter + spawn points
-│           ├── cabin.js         cabin geometry as collision boxes
-│           └── collision.js     spatial grid, capsule collision, world raycasting
+│           ├── terrain.js       gentle heightfield + levelled hut pads
+│           ├── props.js         trees, hedgerow, fields, haystacks, sheep herds
+│           ├── huts.js          village huts as collision boxes
+│           └── collision.js     collider list + validated spawn points
 │
 ├── client/                    ← everything the browser loads
 │   ├── index.html
@@ -155,14 +171,24 @@ html5game/
 │       │   └── Scope.js         true magnified optic for the M700
 │       ├── maps/
 │       │   ├── MapRegistry.js
-│       │   └── snowy_forest/
-│       │       ├── SnowyForestMap.js   scene assembly
-│       │       ├── TerrainMesh.js      heightfield → mesh, snow/rock painting
-│       │       ├── Foliage.js          instanced forest
-│       │       ├── CabinMesh.js        log cabin built from the collision boxes
-│       │       └── Sky.js              sky dome + light rig
+│       │   ├── snowy_forest/
+│       │   │   ├── SnowyForestMap.js   scene assembly
+│       │   │   ├── TerrainMesh.js      heightfield → mesh, snow/rock painting
+│       │   │   ├── Foliage.js          instanced forest
+│       │   │   ├── CabinMesh.js        log cabin built from the collision boxes
+│       │   │   └── Sky.js              sky dome + light rig
+│       │   └── grassy_plains/
+│       │       ├── GrassyPlainsMap.js  scene assembly
+│       │       ├── TerrainMesh.js      green terrain painting
+│       │       ├── GrassField.js       instanced wind-swayed grass
+│       │       ├── HutMesh.js          huts built from the collision boxes
+│       │       ├── Props.js            trees, hedge, fences, haystacks, carts
+│       │       ├── Sheep.js            wandering flocks
+│       │       └── Sky.js              summer sky + drifting clouds
 │       ├── effects/
 │       │   ├── Snowfall.js      GPU snow, camera-tiled
+│       │   ├── WindMotes.js     visible wind, camera-tiled
+│       │   ├── Blood.js         hit mist, bleed trails, death pools
 │       │   └── Impacts.js       tracers, muzzle flash, debris, brass
 │       ├── audio/AudioEngine.js procedural gunshots, footsteps, wind (no audio files)
 │       └── ui/
@@ -172,9 +198,11 @@ html5game/
 │           └── DeathScreen.js   death report + respawn timer + match over
 │
 └── tools/
+    ├── test-all.mjs            run every server-side suite
     ├── check.mjs               syntax-check every source file
     ├── test-handshake.mjs      WebSocket RFC 6455 conformance
-    ├── test-combat.mjs         combat + hardcore-rules integration test
+    ├── test-maps.mjs           invisible-wall / spawn / boundary integrity
+    ├── test-combat.mjs         combat, hardcore rules, map switching
     └── browser-check.js        paste-into-console client smoke test
 ```
 
@@ -236,7 +264,42 @@ The head also wins any tie, since it sits inside the body's upper cap.
 
 ---
 
-## 5. The map — Whiteout Ridge
+## 5. The maps
+
+Two maps ship, and the whole server can move between them at runtime. Anyone can
+type it in chat:
+
+```
+/map snow      →  Whiteout Ridge
+/map grass     →  Hollowmere
+/maps          →  list them
+/help          →  list commands
+```
+
+The server flips its active map — which instantly changes collision, spawns and
+bullet tracing — tells every client to rebuild, suspends combat until they report
+back, then respawns everybody. A 15-second cooldown stops map-vote spam, and a
+client that fails to load can never stall the server: after 20 seconds play resumes
+without it. Joining a server that is already on the other map works the same way —
+the welcome message names the map and the client rebuilds before you spawn.
+
+### About invisible walls
+
+Both maps are checked by [`tools/test-maps.mjs`](tools/test-maps.mjs), which exists
+because an oversized collider is indistinguishable, in play, from an invisible wall
+and is miserable to find by hand. It samples ~9,000 points of open ground per map,
+pushes a player capsule through the real solver, and every time the solver moves the
+player sideways it proves there is a real collider close enough to justify it. It
+then walks a sprinting player at the edge of the world in 72 directions and asserts
+that geometry — a hedge, a trunk, a slope too steep to stand on — stops them well
+before the numeric clamp.
+
+That test found two genuine bugs: the snowy map's mountains were too gentle to
+trigger sliding, so a sprinting player could walk up them into the hard clamp; and
+spawn points were only checked against the heightfield, so a few sat inside rocks.
+Both are fixed, and spawns are now filtered through the collision solver itself.
+
+### Whiteout Ridge — snowy forest
 
 A frozen pine basin ringed by impassable mountains, roughly 185 m across.
 
@@ -261,6 +324,30 @@ Spawns: 32 candidate points; the server picks the one furthest from any living
 enemy, penalising recently used spawns.
 
 ---
+
+### Hollowmere — grassy plains
+
+Open summer farmland: rolling fields, a village of thatched huts, fenced paddocks,
+haystacks, hedgerows and sheep. Deliberately gentle underfoot — nothing here is
+steep enough to slide on.
+
+- **Grass** — 16,000 instanced tufts with the wind baked into the vertex shader via
+  `onBeforeCompile`, so the blades still receive the scene's lighting, fog and
+  shadows. Two details make the wind *readable* rather than a generic wobble: a
+  constant lean downwind, and a phase that advances along the wind vector, so gusts
+  travel across the field as visible waves instead of every blade moving in unison.
+  Distant blades shrink into the painted ground rather than popping out.
+- **Wind** — one vector drives the grass, the drifting clouds and a thin haze of
+  airborne motes, so everything visibly agrees about which way it is blowing. The
+  motes use the same camera-tiling trick as the snowfall: world-locked, zero CPU.
+- **Sheep** — five flocks that graze, amble around their anchor, and scatter when a
+  gun goes off near them. Ambient only: no collider, no hitbox, no network traffic.
+  Each client simulates its own flock, which nobody notices.
+- **Huts** — mud-brick walls under a thatched hip roof, drawn by filling the same
+  boxes the collider uses, with shootable window bands like the cabin.
+- **The boundary is a hedgerow** — not an invisible wall, and not a slope you slide
+  off. It is a ring of overlapping cylinders drawn as a thick hedge; the gaps
+  between them are narrower than a player, so it is solid because of its geometry.
 
 ## 6. Weapons
 
@@ -298,7 +385,23 @@ computed from the real cone angle, so the crosshair never lies to you.
 
 ---
 
-## 7. Characters and ragdolls
+## 7. Blood
+
+Three effects, all in [`client/js/effects/Blood.js`](client/js/effects/Blood.js):
+
+- **Mist** — a wound throws a spray of droplets along the round's path plus a
+  hanging cloud that expands and thins out. Scales with the damage dealt.
+- **Trails** — below about 60 health you drip as you move, on your screen and on
+  everyone else's. The bleeding flag is set by the **server** when it builds each
+  snapshot rather than reported by the client, so a modified client cannot stop
+  itself bleeding.
+- **Pools** — a corpse grows a pool underneath it, with irregular satellite stains
+  so the edge is never a clean circle.
+
+Stains are a single InstancedMesh with a per-instance alpha attribute, so a whole
+match of blood costs one draw call. They soak away after about half a minute.
+
+## 8. Characters and ragdolls
 
 The soldier is a bone hierarchy of rigid parts (65 meshes) wearing procedurally
 painted winter camo — an off-white base with grey and blue-grey blotches and printed
@@ -336,7 +439,7 @@ death view that orbits it, with a raycast to keep the camera out of terrain.
 
 ---
 
-## 8. Audio
+## 9. Audio
 
 Every sound is synthesised at runtime from noise and oscillators — there is not a
 single audio file in the project, which is a large part of why it unzips and runs
@@ -356,7 +459,7 @@ There are, deliberately, no hit or kill sounds anywhere in `AudioEngine.js`.
 
 ---
 
-## 9. Controls
+## 10. Controls
 
 | Input | Action |
 |---|---|
@@ -369,12 +472,16 @@ There are, deliberately, no hit or kill sounds anywhere in `AudioEngine.js`.
 | `R` | Reload |
 | `1` / `2` | Primary / secondary |
 | `Tab` (hold) | Scoreboard |
-| `T` or `Enter` | Chat |
+| `T` or `Enter` | Chat (also where `/map` goes) |
 | `Esc` | Release mouse |
+
+While the chat box is open the keyboard belongs to it: typing "wasd" in a message
+does not queue movement, and the pause overlay stays down — releasing the mouse to
+type is intentional, not a pause.
 
 ---
 
-## 10. Tuning
+## 11. Tuning
 
 Almost everything worth changing is in two files:
 
@@ -395,12 +502,19 @@ __whiteout.settings.set('quality', 'ultra')   // auto | low | medium | high | ul
 
 ---
 
-## 11. Testing
+## 12. Testing
+
+```bash
+runtime\node\node.exe tools\test-all.mjs
+```
+
+Or individually:
 
 ```bash
 runtime\node\node.exe tools\check.mjs            # syntax-check all source
 runtime\node\node.exe tools\test-handshake.mjs   # WebSocket RFC 6455 conformance
-runtime\node\node.exe tools\test-combat.mjs      # combat + hardcore rules
+runtime\node\node.exe tools\test-maps.mjs        # invisible walls, spawns, boundaries
+runtime\node\node.exe tools\test-combat.mjs      # combat, hardcore rules, /map
 ```
 
 For the client, deploy into a match, open the console and paste
@@ -420,7 +534,7 @@ Two of these exist because of bugs that were genuinely nasty to find:
 
 ---
 
-## 12. Extending it
+## 13. Extending it
 
 **A new weapon** — add an entry to `shared/weapons.js` and a builder in
 `client/js/weapons/WeaponModels.js` returning `{ group, muzzle, eject, sight }`.
@@ -436,7 +550,7 @@ same three hooks: `onKill`, `pickSpawn`, `isOver`.
 
 ---
 
-## 13. Known limitations
+## 14. Known limitations
 
 - The bundled `runtime/node` is the **Windows x64** build. On macOS/Linux,
   `start.sh` falls back to a system Node 18+ (the game itself is platform-agnostic).
@@ -445,11 +559,15 @@ same three hooks: `onKill`, `pickSpawn`, `isOver`.
   reconciliation. Fine among friends on a LAN; not hardened against a determined
   cheater.
 - Bullets are hitscan. Muzzle velocities are in the weapon table but unused.
-- One map, one game mode — by design, for this first cut.
+- One game mode. Two maps, switchable in-match with `/map`.
+- Anyone can change the map. There are no admin roles — a 15-second cooldown is the
+  only brake. Fine among friends; not what you would ship to strangers.
+- Sheep are simulated per client rather than by the server, so two players will not
+  see a given sheep in exactly the same place. They are scenery, not targets.
 
 ---
 
-## 14. Credits
+## 15. Credits
 
 Three.js r160 (MIT), vendored in `client/vendor/`. Everything else — terrain,
 weapons, characters, camo, animation, ragdoll physics, audio, the WebSocket server —

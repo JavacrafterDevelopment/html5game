@@ -13,7 +13,7 @@
 import * as THREE from '../core/three.js';
 import { getWeapon, fireIntervalMs, PRIMARY_CHOICES, DEFAULT_SECONDARY } from '/shared/weapons.js';
 import { WORLD, MOVE } from '/shared/config.js';
-import { raycastWorld } from '/shared/maps/snowy_forest/collision.js';
+import { raycastWorld } from '/shared/maps/active.js';
 import { clamp, damp } from '/shared/math/num.js';
 
 const LEFT = 0, RIGHT = 2;

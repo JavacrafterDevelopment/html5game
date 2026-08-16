@@ -11,8 +11,7 @@
 
 import * as THREE from '../core/three.js';
 import { RIG } from '../characters/Soldier.js';
-import { collideCapsule } from '/shared/maps/snowy_forest/collision.js';
-import { heightAt } from '/shared/maps/snowy_forest/terrain.js';
+import { collideCapsule, heightAt } from '/shared/maps/active.js';
 
 const GRAVITY = -22;
 const DAMPING = 0.986;

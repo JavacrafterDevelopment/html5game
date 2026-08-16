@@ -20,6 +20,7 @@ import { C, S, encode } from '../shared/protocol.js';
 import { PLAYER } from '../shared/config.js';
 import { heightAt } from '../shared/maps/snowy_forest/terrain.js';
 import { isBlocked } from '../shared/maps/snowy_forest/collision.js';
+import { getActiveMapId } from '../shared/maps/active.js';
 import { CABIN } from '../shared/maps/snowy_forest/cabin.js';
 
 let passed = 0;
@@ -115,13 +116,24 @@ function run() {
   ok(`body shot registered (Bravo at ${bravo.hp} hp)`);
 
   // ------------------------------------------------- 2: shooter learns nothing
+  // Blood is the ONE visible consequence of a hit, and it is a world event: it
+  // carries a position and a direction, and deliberately no identities. Everything
+  // that could be turned into a hitmarker or a kill confirmation is still absent.
   const shooterMessages = connA.sent.map((m) => m.m);
   assert.ok(!shooterMessages.includes(S.YOU_DIED), 'shooter must not get a death report');
+
   const leakedHit = connA.sent.some((m) =>
-    JSON.stringify(m).toLowerCase().includes('hit') ||
-    m.m === 'hitmarker' || m.m === 'damage' || m.m === 'kill');
-  assert.ok(!leakedHit, 'shooter received something that looks like hit feedback: ' + JSON.stringify(connA.sent));
-  ok('shooter received no hit feedback of any kind');
+    m.m === 'hitmarker' || m.m === 'damage' || m.m === 'kill' ||
+    (m.m !== S.BLOOD && JSON.stringify(m).toLowerCase().includes('hit')));
+  assert.ok(!leakedHit, 'shooter received hit feedback: ' + JSON.stringify(connA.sent));
+
+  const blood = connA.of(S.BLOOD)[0];
+  assert.ok(blood, 'a hit should produce blood in the world');
+  assert.ok(Array.isArray(blood.p) && Array.isArray(blood.d), 'blood needs a position and a direction');
+  for (const field of ['id', 'by', 'byName', 'victim', 'name', 'damage', 'hp']) {
+    assert.strictEqual(blood[field], undefined, `blood must not carry "${field}"`);
+  }
+  ok('shooter sees blood but is told no identity, damage or kill');
 
   // ---------------------------------------------------------------- 3: kill
   connA.clear(); connB.clear(); connC.clear();
@@ -250,6 +262,57 @@ function run() {
   const dupe = join(game, connE, 'Alpha', 'ak47');
   assert.notStrictEqual(dupe.name, 'Alpha', 'duplicate names must be disambiguated');
   ok(`duplicate callsign became "${dupe.name}"`);
+
+  // ------------------------------------------------------- 13: /map switching
+  const before = getActiveMapId();
+  connA.clear(); connB.clear();
+  connA.fire('message', encode(C.CHAT, { text: '/map grass' }));
+  assert.strictEqual(getActiveMapId(), 'grassy_plains', '/map grass should switch the active map');
+  assert.notStrictEqual(getActiveMapId(), before);
+  ok('/map grass switches the whole server');
+
+  const change = connB.of(S.MAP_CHANGE)[0];
+  assert.ok(change, 'every player must be told about the map change');
+  assert.strictEqual(change.map.id, 'grassy_plains');
+  assert.ok(change.map.environment, 'clients need the environment to rebuild');
+  ok('all players receive the new map descriptor');
+
+  // Play is suspended until clients report back.
+  assert.ok(game.mapSwitch, 'a switch should be in progress');
+  for (const p of game.players.values()) assert.strictEqual(p.alive, false, 'nobody is alive mid-switch');
+  alpha.lastShotAt = 0;
+  const hpBefore = bravo.hp;
+  shootAt(connA, alpha, bravo, 1.1);
+  assert.strictEqual(bravo.hp, hpBefore, 'shots must not resolve while the world is being rebuilt');
+  ok('combat is suspended until every client has rebuilt');
+
+  // Everyone reporting ready finishes the switch and respawns the server.
+  for (const c of [connA, connB, connC, connD, connE]) {
+    c.fire('message', encode(C.MAP_READY, {}));
+  }
+  assert.strictEqual(game.mapSwitch, null, 'switch should complete once all clients are ready');
+  for (const p of game.players.values()) {
+    assert.strictEqual(p.alive, true, 'everyone respawns on the new map');
+    const onNewMap = Math.hypot(p.pos[0], p.pos[2]) < 100;
+    assert.ok(onNewMap, 'spawns should be inside the new map');
+  }
+  ok('map change completes and respawns the whole server');
+
+  // Unknown maps are rejected without disturbing anything.
+  connA.clear();
+  game.lastMapChangeAt = 0;
+  connA.fire('message', encode(C.CHAT, { text: '/map atlantis' }));
+  assert.strictEqual(getActiveMapId(), 'grassy_plains', 'unknown map must not change anything');
+  assert.ok(connA.of(S.NOTICE).length > 0, 'unknown map should explain itself');
+  ok('unknown map names are rejected with a notice');
+
+  // A slash command is never echoed as chat.
+  connB.clear();
+  game.lastMapChangeAt = 0;
+  connA.fire('message', encode(C.CHAT, { text: '/map snow' }));
+  assert.strictEqual(connB.of(S.CHAT).length, 0, 'commands must not appear as chat messages');
+  assert.strictEqual(getActiveMapId(), 'snowy_forest', '/map snow switches back');
+  ok('/map snow switches back and commands are not echoed as chat');
 
   game.stop();
   console.log(`\n${passed} checks passed.`);

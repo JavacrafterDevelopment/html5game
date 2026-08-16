@@ -8,7 +8,7 @@
 
 import { MATCH } from '../../shared/config.js';
 import { MATCH_STATE } from '../../shared/protocol.js';
-import { SPAWN_POINTS } from '../../shared/maps/snowy_forest/index.js';
+import { spawnPoints } from '../../shared/maps/active.js';
 
 export class FreeForAll {
   constructor(options = {}) {
@@ -83,6 +83,8 @@ export class FreeForAll {
    * materialise on top of each other.
    */
   pickSpawn(player, players) {
+    // Resolved per call: the active map can change mid-match via /map.
+    const SPAWN_POINTS = spawnPoints();
     let best = null;
     let bestScore = -Infinity;
 

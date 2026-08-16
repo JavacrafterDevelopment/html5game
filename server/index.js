@@ -12,7 +12,7 @@ import { SERVER_CONFIG, applyCliOverrides } from './config/server.config.js';
 import { createStaticHandler, send404 } from './net/static.js';
 import { attachWebSocketServer } from './net/websocket.js';
 import { GameServer } from './core/GameServer.js';
-import { COLLIDER_COUNT, PROPS, MAP_INFO } from '../shared/maps/snowy_forest/index.js';
+import { colliderCount, mapInfo } from '../shared/maps/active.js';
 
 const config = applyCliOverrides(SERVER_CONFIG, process.argv.slice(2));
 
@@ -73,7 +73,7 @@ function onListening() {
   console.log(line);
   console.log('  WHITEOUT  -  hardcore FFA');
   console.log(line);
-  console.log(`  Map          : ${MAP_INFO.name} (${PROPS.trees.length} trees, ${COLLIDER_COUNT} colliders)`);
+  console.log(`  Map          : ${mapInfo().name} (${colliderCount()} colliders)`);
   console.log(`  Mode         : Free For All, first to ${config.killTarget} kills`);
   console.log(`  Max players  : ${config.maxPlayers}`);
   console.log('');

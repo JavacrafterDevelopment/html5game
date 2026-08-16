@@ -12,7 +12,7 @@ export const TERRAIN = {
   seed: 1337,
   extent: 140,          // world spans [-140, 140] on both axes
   playRadius: 92,       // beyond this the mountains take over
-  hardRadius: 104,      // absolute movement clamp
+  hardRadius: 122,      // last-resort clamp, far up a cliff nobody can climb
   meshResolution: 168   // vertices per side when the client tessellates
 };
 
@@ -42,10 +42,17 @@ function rawHeight(x, z) {
   const creek = Math.abs(z - 8 - Math.sin(x * 0.045) * 14);
   h -= smoothstep(9, 0, creek) * 2.6;
 
-  // Mountain ring. Rises hard past playRadius so it is genuinely unclimbable.
+  // Mountain ring.
+  //
+  // The rise is packed into a narrow band on purpose. A gentle 30-degree climb still
+  // reads as "mountain" from inside the bowl, but a sprinting player walks straight
+  // up it and stops dead on the numeric clamp -- an invisible wall. Concentrating
+  // the same height into r 80..112 puts the face past 70 degrees, which is steeper
+  // than MOVE.SLIDE_SLOPE, so the snow gives way and slides you back down. The
+  // boundary is then something you can see and feel rather than an arbitrary limit.
   const r = Math.hypot(x, z);
-  const m = smoothstep(76, 138, r);
-  h += m * m * (78 + ridge(x * 0.021, z * 0.021, 4, S + 77) * 40);
+  const m = smoothstep(80, 112, r);
+  h += m * m * (95 + ridge(x * 0.021, z * 0.021, 4, S + 77) * 40);
 
   return h;
 }
