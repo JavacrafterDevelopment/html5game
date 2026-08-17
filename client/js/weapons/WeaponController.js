@@ -234,7 +234,9 @@ export class WeaponController {
 
     // ---------------------------------------------------------- feedback
     this.spread = Math.min(this.spread + feel.spreadPerShot, feel.spreadMax);
-    const kickScale = this.view.adsBlend > 0.7 ? 0.72 : 1.0;
+    // Aiming buys a much calmer climb: the whole point of the sights is being able
+    // to watch where the rounds are going.
+    const kickScale = this.view.adsBlend > 0.7 ? 0.58 : 1.0;
     this.player.addRecoil(
       feel.recoilV * kickScale * (0.82 + Math.random() * 0.36),
       feel.recoilH * kickScale * (Math.random() - 0.5) * 2

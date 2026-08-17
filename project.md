@@ -104,6 +104,9 @@ html5game/
 ├── project.md                 ← this file
 ├── runtime/
 │   └── node/                  ← bundled Node 22 + npm. This is what makes it portable.
+├── assets/
+│   ├── ak.glb                 ← AK-47 model
+│   └── m4.glb                 ← M4A1 model, 18 separately named parts
 │
 ├── server/                    ← authoritative game server (Node)
 │   ├── index.js                 entry point, HTTP + WebSocket + LAN address printout
@@ -138,9 +141,10 @@ html5game/
 │       │   └── collision.js     collider list + validated spawn points
 │       └── grassy_plains/
 │           ├── index.js         map bundle
-│           ├── terrain.js       gentle heightfield + levelled hut pads
-│           ├── props.js         trees, hedgerow, fields, haystacks, sheep herds
-│           ├── huts.js          village huts as collision boxes
+│           ├── terrain.js       gentle heightfield + levelled hut and cave pads
+│           ├── props.js         trees, hedgerow, haystacks, sheep herds
+│           ├── huts.js          two enterable huts as collision boxes
+│           ├── cave.js          rock chamber with a single mouth
 │           └── collision.js     collider list + validated spawn points
 │
 ├── client/                    ← everything the browser loads
@@ -149,11 +153,13 @@ html5game/
 │   ├── styles/                  main.css, menu.css, hud.css
 │   └── js/
 │       ├── main.js              boot: build world → ask for callsign → connect
+│       ├── assets/AKModelData.js  AK GLB inlined as base64, so it loads offline
 │       ├── core/
 │       │   ├── Game.js          the orchestrator and the frame loop
 │       │   ├── Input.js         pointer lock, keys, mouse
 │       │   ├── Settings.js      quality tiers, sensitivity, persistence
 │       │   ├── three.js         single import point for Three
+│       │   ├── GLBParser.js     minimal glTF-binary reader (no loader library)
 │       │   └── GeoUtils.js      geometry merge / vertex colouring
 │       ├── net/NetClient.js     WebSocket + server clock estimation
 │       ├── player/
@@ -165,7 +171,8 @@ html5game/
 │       │   ├── CamoTexture.js   winter camo painted onto a canvas at runtime
 │       │   └── Animator.js      procedural walk/aim/crouch/sprint poses
 │       ├── weapons/
-│       │   ├── WeaponModels.js  AK-47, M4A1, Glock 17, M700 built from primitives
+│       │   ├── WeaponModels.js  AK/M4 from GLB, Glock/M700 from primitives,
+│       │   │                    plus the M4's part-driven reload choreography
 │       │   ├── ViewModel.js     first-person placement, ADS, recoil, reload
 │       │   ├── WeaponController.js  firing, ammo, spread, switching
 │       │   └── Scope.js         true magnified optic for the M700
@@ -368,7 +375,10 @@ collider is the inverse of an invisible wall, and just as bad.
 
 ## 6. Weapons
 
-All four are modelled from primitives at real-world scale — no downloaded assets.
+The AK-47 and M4A1 come from GLB models in `assets/`, parsed by the project's own
+`client/js/core/GLBParser.js` (no loader library). Everything else is modelled from
+primitives at real-world scale. All of it ships inside the folder — nothing is
+fetched at runtime.
 
 | | AK-47 | M4A1 | Glock 17 | M700 |
 |---|---|---|---|---|
@@ -388,6 +398,47 @@ hand-authored: each model exposes its own sight point, and the view model transl
 that point onto the screen centre, so the irons line up correctly for every gun
 automatically.
 
+Translation alone is not always enough. On the M4 the front post tip sits 9.5 mm
+proud of the rear aperture across a 38 cm sight radius, so putting the aperture on
+the crosshair leaves the post floating 1.4° above the ring. The model is therefore
+built inside a group pitched nose-down by exactly that angle about the aperture,
+which puts both on a line down −Z. Measured at full ADS, the post lands 4 px and the
+aperture 10 px from screen centre on a 686 px frame.
+
+The other number that matters is `view.ads[2]` in `shared/weapons.js` — the
+eye-to-sight distance. A full-length carbine whose origin sits mid-receiver will
+shove its buttstock out in *front* of the lens if this is too large, and the stock
+then fills half the screen. It wants to be small enough that the stock ends up
+behind the eye where a shouldered stock belongs (0.235 m for the M4).
+
+### The M4's reload
+
+The M4's GLB ships as 18 separately named nodes, so its reload drives the parts
+directly instead of waving the whole weapon around. The joke is that the magazine is
+the part you keep: rip it out, hurl the rifle down range, take a fresh rifle from
+off screen, slam the same magazine into it, charge the bolt.
+
+The thrown rifle and the fresh one are the same object. It is outside the frustum
+from t≈0.34 to t≈0.57, so the hard cut from "tumbling away" to "rising into frame"
+is never visible. Two things this depends on:
+
+- The throw is **linear in time**, not eased — a real projectile leaves the hand
+  fast and gravity takes over. Lobbed with an ease-in curve it just shrinks to a dot
+  in the middle of the screen and then blinks out.
+- It has to clear the **bottom** edge of the frame, not the far distance.
+
+A model can own its own choreography by exposing a `reload` object with
+`begin/update/end`; `ViewModel` hands it a pose it may steer, and falls back to the
+generic drop-and-tilt animation for models that do not. Two structural rules apply
+to anything written against that hook:
+
+- The animation frames (`gun`, `stash`) sit at the **origin**, so `end()` can reset
+  them to zero. Any rest offset lives one level below them. Putting the offset on
+  the animated node instead walks the weapon 15 cm closer to your eye on every
+  reload and never puts it back — `tools/browser-check.js` asserts against this.
+- The magazine is reparented into a group that shares the magazine well's frame, so
+  handing it across at (0,0,0) does not move it a millimetre.
+
 **The M700's scope is a real optic**, not a FOV trick. The scene is rendered a
 second time through a 13° camera into a texture, and that texture is shown inside
 the lens circle. The world outside the scope stays at normal FOV. The shader adds
@@ -396,9 +447,46 @@ mil-dot reticle with holdover hashes. Sway is applied to the *image*, not the
 reticle — which is what a wobbling rifle actually does. Mouse sensitivity scales
 down with magnification.
 
-Recoil is a camera kick that partially recovers; the remainder is drift you have to
-correct yourself. Spread grows per shot and with movement, and the crosshair gap is
-computed from the real cone angle, so the crosshair never lies to you.
+### Recoil
+
+There are two independent recoils and they serve different purposes.
+
+**Aim recoil** (`feel.recoilV/recoilH`) is a camera kick that partially recovers;
+the remainder is drift you have to correct yourself. This one is gameplay.
+
+**Visual recoil** (`feel.kickBack`) shoves and tilts the view model. This one is
+presentation only — the shot has already been fired and the round has already gone
+where the camera was pointing. It is damped hard while aiming (×0.32 on the
+accumulator, ×0.58 on the camera kick), because a sight picture that swings several
+degrees per round is unusable, and there is nothing to be gained from throwing the
+target off the screen you are trying to shoot at.
+
+Across a 12-round burst that works out to:
+
+| | gun tilt, hip | gun tilt, ADS | aim climb, ADS |
+|---|---|---|---|
+| AK-47 | 2.1° | 0.7° | 0.4° |
+| M4A1 | 1.8° | 0.6° | 0.3° |
+| Glock 17 | 1.2° | 0.4° | 0.3° |
+| M700 (3 shots) | 4.0° | 1.3° | 0.7° |
+
+Spread grows per shot and with movement, and the crosshair gap is computed from the
+real cone angle, so the crosshair never lies to you.
+
+### Muzzle flash
+
+The flash is a **7.5 cm** camera-facing quad carrying a soft radial texture with a
+few spikes, plus five thin, slow, growing smoke particles drifting off the barrel.
+
+It has to be textured. An untextured quad has hard edges, so at any size worth
+seeing it reads as a solid rectangle sitting on top of the sights — which is exactly
+what the first version was, at 34–51 cm. The visible core now falls off to nothing
+well inside the quad, so the geometry's own edge is never visible.
+
+The accompanying point light is deliberately weak (1.6 intensity, 6 m range). On a
+daylight snowfield a bright muzzle light blows out a quarter of the frame on every
+round, which is its own kind of not being able to see what you are shooting at —
+measured, it took blown-out pixels from 7.9% of the frame down to 2.5%.
 
 ---
 
@@ -569,6 +657,17 @@ Two of these exist because of bugs that were genuinely nasty to find:
   because opaque geometry is drawn first; everything queued behind it (snowfall,
   tracers, muzzle flashes, the entire scope overlay) silently vanishes. The check
   renders a full frame and asserts no material declares fog without the uniforms.
+
+`browser-check.js` also guards two things that are easy to break by accident and
+hard to notice from a single screenshot:
+
+- **Weapon pose drift.** It runs a full reload to completion and asserts the muzzle
+  ends up where it started. The M4's reload resets its animation frames to zero, so
+  any rest offset stored on an animated node accumulates instead — one reload and
+  the rifle is 15 cm closer to your eye, permanently.
+- **Muzzle flash size.** It asserts the flash quad is under 13 cm and carries a
+  texture. The flash is drawn a few centimetres from the eye; anything approaching
+  the size of the weapon stops being a flash and starts being a wall.
 
 ---
 

@@ -48,11 +48,16 @@ export class ViewModel {
     this._targetPos = new THREE.Vector3();
     this._targetRot = new THREE.Euler();
     this._muzzleWorld = new THREE.Vector3();
+
+    // Handed to a model's own reload choreography so it can steer the whole
+    // viewmodel, not just the parts it owns.
+    this._pose = { pos: this._targetPos, rot: { x: 0, y: 0, z: 0 } };
   }
 
   setWeapon(id, force = false) {
     if (this.weaponId === id && this.model && !force) return;
     if (this.model) {
+      if (this.reloadT > 0) this.model.reload?.end();
       this.holder.remove(this.model.group);
       disposeWeaponModel(this.model);
     }
@@ -76,11 +81,20 @@ export class ViewModel {
     this.adsBlend = 0;
   }
 
-  /** Trigger the recoil animation for one shot. */
+  /**
+   * Trigger the recoil animation for one shot.
+   *
+   * This is presentation only -- the shot has already been fired and the camera
+   * kick is applied separately. Aiming damps it hard: a sight picture that swings
+   * several degrees per round is unusable, and there is nothing to be gained from
+   * throwing the target off the screen you are trying to shoot at.
+   */
   fire() {
     const feel = this.def.feel;
-    this.kick = Math.min(this.kick + feel.kickBack, feel.kickBack * 2.2);
-    this.kickRot = Math.min(this.kickRot + feel.kickBack * 2.6, feel.kickBack * 5);
+    const damp = lerp(1, 0.32, this.adsBlend);
+    const back = feel.kickBack * damp;
+    this.kick = Math.min(this.kick + back, feel.kickBack * 1.7);
+    this.kickRot = Math.min(this.kickRot + back * 0.95, feel.kickBack * 1.9);
     if (this.def.boltActionMs) {
       this.boltT = 1;
       this.boltDuration = this.def.boltActionMs / 1000;
@@ -88,11 +102,14 @@ export class ViewModel {
   }
 
   startReload(durationMs) {
+    if (this.reloadT > 0) this.model?.reload?.end();
     this.reloadT = 1;
     this.reloadDuration = durationMs / 1000;
+    this.model?.reload?.begin();
   }
 
   cancelReload() {
+    if (this.reloadT > 0) this.model?.reload?.end();
     this.reloadT = 0;
   }
 
@@ -106,20 +123,25 @@ export class ViewModel {
     const feel = this.def.feel;
 
     // ---------------------------------------------------------- blends
+    const anim = this.model.reload;
+    // Some reloads leave you holding nothing. Aiming down sights you do not
+    // currently have is not a sight picture worth blending toward.
+    const canAds = !(this.reloadT > 0 && anim?.blocksAds);
     const adsSpeed = 1000 / Math.max(60, feel.adsMs);
-    this.adsBlend = damp(this.adsBlend, st.ads && !st.sprint ? 1 : 0, adsSpeed * 2.2, dt);
+    this.adsBlend = damp(this.adsBlend, st.ads && !st.sprint && canAds ? 1 : 0, adsSpeed * 2.2, dt);
     this.sprintBlend = damp(this.sprintBlend, st.sprint ? 1 : 0, 9, dt);
     this.lowerBlend = damp(this.lowerBlend, st.lowered ? 1 : 0, 10, dt);
 
     if (this.reloadT > 0 && this.reloadDuration > 0) {
       this.reloadT = Math.max(0, this.reloadT - dt / this.reloadDuration);
+      if (this.reloadT === 0) anim?.end();
     }
     if (this.boltT > 0 && this.boltDuration > 0) {
       this.boltT = Math.max(0, this.boltT - dt / this.boltDuration);
     }
 
-    this.kick = damp(this.kick, 0, 13, dt);
-    this.kickRot = damp(this.kickRot, 0, 11, dt);
+    this.kick = damp(this.kick, 0, 19, dt);
+    this.kickRot = damp(this.kickRot, 0, 17, dt);
 
     // ---------------------------------------------------------- sway
     // The weapon lags behind the mouse, much less so when aiming.
@@ -169,19 +191,29 @@ export class ViewModel {
     this._targetPos.y -= this.lowerBlend * 0.34;
     rx += this.lowerBlend * 0.85;
 
-    // reload: drop the weapon, tilt it toward the mag well, bring it back
+    // reload
     if (this.reloadT > 0) {
       const t = 1 - this.reloadT;                 // 0 -> 1 across the reload
-      const arc = Math.sin(t * Math.PI);          // peaks in the middle
-      this._targetPos.y -= arc * 0.13;
-      this._targetPos.x += arc * 0.045;
-      this._targetPos.z += arc * 0.05;
-      rx += arc * 0.52;
-      rz += arc * 0.40;
-      // a shake as the fresh magazine seats
-      if (t > 0.55 && t < 0.72) {
-        const s = Math.sin((t - 0.55) * 42) * 0.012;
-        this._targetPos.y += s;
+      if (anim) {
+        // The model owns its own choreography and steers the viewmodel through
+        // the pose object.
+        const pose = this._pose;
+        pose.rot.x = rx; pose.rot.y = ry; pose.rot.z = rz;
+        anim.update(t, pose);
+        rx = pose.rot.x; ry = pose.rot.y; rz = pose.rot.z;
+      } else {
+        // generic: drop the weapon, tilt it toward the mag well, bring it back
+        const arc = Math.sin(t * Math.PI);        // peaks in the middle
+        this._targetPos.y -= arc * 0.13;
+        this._targetPos.x += arc * 0.045;
+        this._targetPos.z += arc * 0.05;
+        rx += arc * 0.52;
+        rz += arc * 0.40;
+        // a shake as the fresh magazine seats
+        if (t > 0.55 && t < 0.72) {
+          const s = Math.sin((t - 0.55) * 42) * 0.012;
+          this._targetPos.y += s;
+        }
       }
     }
 

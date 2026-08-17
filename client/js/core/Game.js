@@ -467,7 +467,8 @@ export class Game {
 
     // muzzle flash + small yellow bullet + world impact on arrival
     const muzzle = shot.muzzle;
-    this.effects.muzzleFlash(muzzle, w.id === 'm700' ? 1.5 : w.id === 'glock17' ? 0.8 : 1.15, this.camera);
+    this.effects.muzzleFlash(
+      muzzle, w.id === 'm700' ? 1.5 : w.id === 'glock17' ? 0.8 : 1.15, this.camera, shot.dir);
 
     const end = shot.hit
       ? shot.hit.point
@@ -518,7 +519,7 @@ export class Game {
     const muzzlePos = rp ? rp.muzzleWorldPosition(this._v1).toArray() : origin;
     this.audio.gunshot(w.audio, muzzlePos);
     this.map.onGunshot?.(muzzlePos);
-    this.effects.muzzleFlash(muzzlePos, w.id === 'm700' ? 1.4 : 1.05, this.camera);
+    this.effects.muzzleFlash(muzzlePos, w.id === 'm700' ? 1.4 : 1.05, this.camera, dir);
 
     const hit = raycastWorld(origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], WORLD.MAX_BULLET_RANGE);
     const end = hit ? hit.point : [

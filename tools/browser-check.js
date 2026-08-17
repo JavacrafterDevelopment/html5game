@@ -48,6 +48,41 @@
   }
   g.viewModel.setWeapon(g.weapons.weaponId);
 
+  // ---- 2b. the M4 comes from m4.glb, with its parts still separable ----
+  g.viewModel.setWeapon('m4a1', true);
+  const m4 = g.viewModel.model;
+  const M4_PARTS = ['M4_Magazine', 'M4_ChargingHandle', 'M4_BoltCarrier', 'M4_FlashHider',
+    'M4_CarryHandle_RearSight', 'M4_FrontSight_GasBlock'];
+  const missing = M4_PARTS.filter((n) => !m4.group.getObjectByName(n));
+  check('M4 loads from m4.glb with named parts', missing.length === 0, missing.join(', '));
+  check('M4 has its own reload choreography', !!m4.reload);
+
+  // A reload throws the rifle out of frame and brings it back. `gun` and `stash`
+  // are animation frames that get reset to (0,0,0), so anything that belongs in
+  // their rest pose has to live BELOW them -- otherwise every reload walks the
+  // weapon 15 cm closer to the eye and never puts it back.
+  {
+    const restOf = () => {
+      g.viewModel.root.updateMatrixWorld(true);
+      const p = new (g.camera.position.constructor)();
+      return m4.muzzle.getWorldPosition(p).clone();
+    };
+    const st = { ads: false, sprint: false, speed: 0, grounded: true, lookDX: 0, lookDY: 0, lowered: false };
+    for (let i = 0; i < 40; i++) g.viewModel.update(1 / 60, st);
+    const before = restOf();
+    g.viewModel.startReload(2400);
+    for (let i = 0; i < 200; i++) g.viewModel.update(1 / 60, st);   // >2.4 s, runs to completion
+    for (let i = 0; i < 40; i++) g.viewModel.update(1 / 60, st);
+    const after = restOf();
+    check('weapon returns to its rest pose after a reload', before.distanceTo(after) < 0.01,
+      `${(before.distanceTo(after) * 100).toFixed(1)} cm of drift`);
+    check('magazine goes back in the weapon',
+      m4.group.getObjectByName('M4_Magazine').parent !== null &&
+      m4.group.getObjectByName('M4_Magazine').getWorldPosition(new (g.camera.position.constructor)())
+        .distanceTo(g.camera.getWorldPosition(new (g.camera.position.constructor)())) < 1);
+  }
+  g.viewModel.setWeapon(g.weapons.weaponId, true);
+
   // ---- 3. effects ----
   const before = g.effects.debris.activeCount;
   g.effects.impact([g.player.pos[0], g.player.pos[1] + 1, g.player.pos[2] + 2], [0, 1, 0], 'terrain');
@@ -57,8 +92,18 @@
   g.effects.tracer([0, 5, 0], [0, 5, 20], {});
   check('tracer pool fires', g.effects.tracers.items.some((i) => i.life > 0));
 
+  const smokeBefore = g.effects.debris.activeCount;
   g.effects.muzzleFlash([g.player.pos[0], g.player.pos[1] + 1.5, g.player.pos[2]], 1, g.camera);
   check('muzzle flash fires', g.effects.flashes.items.some((i) => i.life > 0));
+
+  // The flash is drawn a few centimetres from the eye. Anything approaching the
+  // size of the weapon itself stops being a flash and starts being a wall.
+  const flash = g.effects.flashes.items.find((i) => i.life > 0);
+  check('muzzle flash is small enough to see past', flash.mesh.scale.x < 0.13,
+    `${(flash.mesh.scale.x * 100).toFixed(1)} cm across`);
+  check('muzzle flash has a soft falloff texture, not a bare quad', !!flash.mesh.material.map);
+  g.effects.update(1 / 60, g.camera);
+  check('muzzle smoke puffs out', g.effects.debris.activeCount > smokeBefore);
 
   let e2 = null;
   try { g._render(); } catch (e) { e2 = e.message; }

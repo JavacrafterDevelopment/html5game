@@ -12,6 +12,7 @@
 import * as THREE from '../core/three.js';
 import { parseBase64GLB, loadGLB } from '../core/GLBParser.js';
 import { AK_GLB_BASE64 } from '../assets/AKModelData.js';
+import { clamp, lerp } from '/shared/math/num.js';
 
 let cachedAK47 = null;
 try {
@@ -20,18 +21,31 @@ try {
   console.warn('Failed to parse bundled AK GLB model:', err);
 }
 
+let cachedM4 = null;
+
+/** Try each candidate URL in turn; returns null if none of them load. */
+async function loadFirst(urls, label) {
+  for (const url of urls) {
+    try {
+      return await loadGLB(url);
+    } catch { /* try the next one */ }
+  }
+  console.warn(`Failed to load ${label}, falling back to the procedural model.`);
+  return null;
+}
+
 /** Preload binary weapon assets before deployment */
 export async function preloadWeaponModels() {
-  if (cachedAK47) return;
-  try {
-    cachedAK47 = await loadGLB('/client/assets/ak.glb');
-  } catch (e) {
-    try {
-      cachedAK47 = await loadGLB('/assets/ak.glb');
-    } catch (err) {
-      console.warn('Failed to load ak.glb, falling back to procedural model:', err);
-    }
+  const jobs = [];
+  if (!cachedAK47) {
+    jobs.push(loadFirst(['/client/assets/ak.glb', '/assets/ak.glb'], 'ak.glb')
+      .then((m) => { if (m) cachedAK47 = m; }));
   }
+  if (!cachedM4) {
+    jobs.push(loadFirst(['/assets/m4.glb', '/client/assets/m4.glb'], 'm4.glb')
+      .then((m) => { if (m) cachedM4 = m; }));
+  }
+  await Promise.all(jobs);
 }
 
 // ------------------------------------------------------------------ materials
@@ -135,6 +149,7 @@ function buildAK47() {
       group,
       muzzle,
       eject,
+      shared: true,                     // geometry belongs to the cache, never dispose it
       sight: new THREE.Vector3(0, 0.054, -0.22),
       id: 'ak47'
     };
@@ -191,7 +206,210 @@ function buildAK47() {
 }
 
 // ------------------------------------------------------------------- M4A1
+/**
+ * m4.glb ships as 18 separately named nodes under `M4_Carbine_Root`, already
+ * pointing down -Z at life size (0.84 m flash hider to buttplate), so it needs no
+ * corrective rotation -- only the sight tilt below.
+ */
+const M4_GEO = {
+  // Rear aperture centre: where the shooter's eye sits.
+  sight: new THREE.Vector3(0, 0.0955, 0.152),
+  // The front post tip is 9.5 mm proud of the aperture across a 38 cm sight
+  // radius. Translating the aperture to screen centre is not enough on its own --
+  // without pitching the rifle nose-down by that angle the post floats about
+  // 1.4 degrees above the ring when you aim.
+  tilt: -0.025,
+  muzzle: [0, 0.033, -0.452],
+  eject: [0.030, 0.024, 0.070]
+};
+
+const seg = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+const easeOut = (x) => 1 - (1 - x) * (1 - x) * (1 - x);
+const easeInOut = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+
+/**
+ * Magazine keyframes, in the rest frame of the magazine well. (0,0,0) is seated.
+ * It is pulled straight down, brought up into the off-hand where it stays for the
+ * whole throw, then arced back into the fresh rifle.
+ */
+const MAG_KEYS = [
+  { t: 0.00, p: [0, 0, 0], r: [0, 0, 0] },
+  { t: 0.12, p: [0, -0.10, 0.02], r: [0.10, 0.00, 0.12] },
+  // Held up where the camera can see it. These offsets are relative to the hip
+  // pose in shared/weapons.js -- move that and the magazine leaves the frame.
+  { t: 0.30, p: [-0.10, 0.190, -0.15], r: [0.55, 0.85, 0.35] },
+  { t: 0.72, p: [-0.08, 0.205, -0.16], r: [0.42, 1.25, 0.28] },
+  { t: 0.88, p: [0, 0.006, 0], r: [0, 0, 0] },
+  { t: 0.93, p: [0, 0, 0], r: [0, 0, 0] }
+];
+
+function sampleMag(t, outPos, outRot) {
+  let a = MAG_KEYS[0], b = MAG_KEYS[MAG_KEYS.length - 1];
+  for (let i = 0; i < MAG_KEYS.length - 1; i++) {
+    if (t >= MAG_KEYS[i].t && t <= MAG_KEYS[i + 1].t) { a = MAG_KEYS[i]; b = MAG_KEYS[i + 1]; break; }
+    if (t > MAG_KEYS[i].t) { a = MAG_KEYS[i]; b = MAG_KEYS[i + 1]; }
+  }
+  const k = easeInOut(seg(t, a.t, b.t));
+  outPos.set(
+    lerp(a.p[0], b.p[0], k), lerp(a.p[1], b.p[1], k), lerp(a.p[2], b.p[2], k)
+  );
+  outRot.set(
+    lerp(a.r[0], b.r[0], k), lerp(a.r[1], b.r[1], k), lerp(a.r[2], b.r[2], k)
+  );
+}
+
+/**
+ * The reload.
+ *
+ * The joke: the magazine is the part you keep. Rip it out, hurl the rifle down
+ * range, take a fresh rifle off screen, slam the same magazine into it.
+ *
+ * The thrown rifle and the fresh one are the same object. It is well outside the
+ * frustum between t=0.36 and t=0.50, so the hard cut from "tumbling away" to
+ * "rising into frame" is never visible.
+ */
+function makeM4Reload(parts) {
+  const { gun, stash, mag, magHome, magSeat, charge, bolt } = parts;
+  const magPos = new THREE.Vector3();
+  const magRot = new THREE.Euler();
+  let active = false;
+
+  return {
+    // The rifle is airborne for most of this; aiming through it makes no sense.
+    blocksAds: true,
+
+    begin() {
+      active = true;
+      // magSeat shares the magazine well's frame, so handing it across at
+      // (0,0,0) does not move it a millimetre.
+      magSeat.add(mag);
+    },
+
+    update(t, pose) {
+      if (!active) return;
+
+      // ---- the rifle -------------------------------------------------------
+      const fly = seg(t, 0.12, 0.40);
+      if (t < 0.12) {
+        // still in hand, rolling right so the magazine well faces the camera
+        const out = easeOut(seg(t, 0, 0.12));
+        gun.visible = true;
+        gun.position.set(0, 0, 0);
+        gun.rotation.set(0, 0, -0.30 * out);
+      } else if (fly < 1) {
+        // Thrown away: a real projectile, so linear in time rather than eased --
+        // it leaves the hand fast and gravity takes over. It has to clear the
+        // BOTTOM edge of the frame well before it is hidden, otherwise the swap
+        // to the fresh rifle reads as the old one blinking out of existence.
+        // At fly=0.8 the whole rifle is already below the frustum.
+        const f = fly;
+        gun.visible = true;
+        gun.position.set(-0.50 * f, 0.55 * f - 3.6 * f * f, -1.9 * f);
+        gun.rotation.set(-7.5 * f, 1.3 * f, 2.4 * f);
+      } else if (t < 0.50) {
+        gun.visible = false;   // empty hands, one magazine, one beat
+      } else {
+        // a fresh one swings up from below the frame, canted over
+        const r = 1 - easeOut(seg(t, 0.50, 0.74));
+        gun.visible = true;
+        gun.position.set(0.20 * r, -0.75 * r, 0);
+        gun.rotation.set(0.55 * r, -0.50 * r, -0.90 * r);
+      }
+
+      // ---- the magazine ----------------------------------------------------
+      sampleMag(t, magPos, magRot);
+      stash.position.set(magPos.x, magPos.y, magPos.z);
+      stash.rotation.copy(magRot);
+
+      // ---- charging handle, once the magazine is home -----------------------
+      const yank = Math.sin(seg(t, 0.90, 1.0) * Math.PI);
+      charge.position.z = yank * 0.055;
+      bolt.position.z = yank * 0.050;
+
+      // ---- what the whole viewmodel does ------------------------------------
+      const swell = Math.sin(clamp(t, 0, 1) * Math.PI);
+      pose.pos.y -= swell * 0.035;
+      pose.rot.x += swell * 0.10;
+      if (t > 0.88 && t < 0.94) pose.pos.y += Math.sin((t - 0.88) * 105) * 0.010;
+    },
+
+    end() {
+      active = false;
+      magHome.add(mag);
+      gun.visible = true;
+      gun.position.set(0, 0, 0);
+      gun.rotation.set(0, 0, 0);
+      stash.position.set(0, 0, 0);
+      stash.rotation.set(0, 0, 0);
+      charge.position.z = 0;
+      bolt.position.z = 0;
+    }
+  };
+}
+
 function buildM4A1() {
+  if (cachedM4) return buildM4A1FromGLB();
+  return buildM4A1Procedural();
+}
+
+function buildM4A1FromGLB() {
+  const group = new THREE.Group();
+
+  // tilt pivots about the rear aperture so the irons line up down -Z
+  const tilt = new THREE.Group();
+  tilt.position.copy(M4_GEO.sight);
+  tilt.rotation.x = M4_GEO.tilt;
+  group.add(tilt);
+
+  // `gun` is everything that gets thrown; `stash` is the off-hand holding the
+  // magazine. Both are pure animation frames parked at the origin, so the
+  // choreography can assign position/rotation outright and reset to zero without
+  // having to remember a rest offset. The offset that undoes the tilt pivot lives
+  // one level down, where nothing animates it.
+  const gun = new THREE.Group();
+  tilt.add(gun);
+  const gunRest = new THREE.Group();
+  gunRest.position.copy(M4_GEO.sight).negate();
+  gun.add(gunRest);
+
+  const stash = new THREE.Group();
+  tilt.add(stash);
+  const magSeat = new THREE.Group();
+  magSeat.position.copy(gunRest.position);
+  stash.add(magSeat);
+
+  const model = cachedM4.clone(true);
+  gunRest.add(model);
+
+  group.traverse((o) => {
+    if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; }
+  });
+
+  const part = (name) => model.getObjectByName(name) || new THREE.Object3D();
+  const mag = part('M4_Magazine');
+  const magHome = mag.parent || model;
+
+  const muzzle = marker(gunRest, M4_GEO.muzzle[0], M4_GEO.muzzle[1], M4_GEO.muzzle[2]);
+  const eject = marker(gunRest, M4_GEO.eject[0], M4_GEO.eject[1], M4_GEO.eject[2]);
+
+  const reload = makeM4Reload({
+    gun, stash, mag, magHome, magSeat,
+    charge: part('M4_ChargingHandle'),
+    bolt: part('M4_BoltCarrier')
+  });
+
+  return {
+    group,
+    muzzle,
+    eject,
+    reload,
+    shared: true,                       // geometry belongs to the cache, never dispose it
+    sight: M4_GEO.sight.clone(),
+    id: 'm4a1'
+  };
+}
+
+function buildM4A1Procedural() {
   const b = new GunBuilder();
   const m = b.mats;
 
@@ -379,6 +597,9 @@ export function createWeaponModel(id, opts = {}) {
 }
 
 export function disposeWeaponModel(model) {
+  // GLB-backed models clone the cached scene, which SHARES geometry with it.
+  // Disposing those buffers would blank the next copy of the weapon.
+  if (model.shared) return;
   model.group.traverse((o) => {
     if (o.isMesh && o.geometry) o.geometry.dispose();
   });

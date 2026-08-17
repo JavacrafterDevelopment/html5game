@@ -96,6 +96,8 @@ class DebrisSystem {
     this.maxLife = new Float32Array(max);
     this.gravity = new Float32Array(max);
     this.drag = new Float32Array(max);
+    this.peak = new Float32Array(max).fill(1);   // ceiling on alpha (smoke is thin)
+    this.grow = new Float32Array(max);           // metres of diameter per second
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -162,6 +164,8 @@ class DebrisSystem {
         this.maxLife[idx] = l;
         this.gravity[idx] = gravity;
         this.drag[idx] = drag;
+        this.peak[idx] = 1;
+        this.grow[idx] = 0;
 
         this.attr.size.array[idx] = sizeRange[0] + Math.random() * (sizeRange[1] - sizeRange[0]);
         this.attr.alpha.array[idx] = 1;
@@ -178,9 +182,49 @@ class DebrisSystem {
     emit(s.puffs, s.puff, 0.22, s.gravity * 0.12, s.life * 1.5, 0.5, 5.0);
   }
 
+  /**
+   * Propellant smoke off the muzzle. Thin, slow, growing -- the point is a wisp
+   * that drifts off the barrel, not a cloud you have to shoot through.
+   */
+  smoke(point, dir, scale = 1) {
+    const count = 5;
+    for (let i = 0; i < count; i++) {
+      const idx = this.head;
+      this.head = (this.head + 1) % this.max;
+      const i3 = idx * 3;
+
+      const spread = 0.55;
+      const ahead = 0.04 + Math.random() * 0.11 * scale;
+      this.attr.pos.array[i3] = point[0] + dir[0] * ahead;
+      this.attr.pos.array[i3 + 1] = point[1] + dir[1] * ahead;
+      this.attr.pos.array[i3 + 2] = point[2] + dir[2] * ahead;
+
+      const speed = (0.7 + Math.random() * 1.3) * scale;
+      this.vel[i3] = (dir[0] + (Math.random() - 0.5) * spread) * speed;
+      this.vel[i3 + 1] = (dir[1] + (Math.random() - 0.5) * spread) * speed + 0.35;
+      this.vel[i3 + 2] = (dir[2] + (Math.random() - 0.5) * spread) * speed;
+
+      const l = 0.30 + Math.random() * 0.34;
+      this.life[idx] = l;
+      this.maxLife[idx] = l;
+      this.gravity[idx] = 0.5;                  // warm gas, it rises
+      this.drag[idx] = 6.5;
+      this.peak[idx] = 0.16 + Math.random() * 0.12;
+      this.grow[idx] = (0.16 + Math.random() * 0.14) * scale;
+
+      this.attr.size.array[idx] = (0.035 + Math.random() * 0.03) * scale;
+      this.attr.alpha.array[idx] = 0;
+      const g = 0.62 + Math.random() * 0.16;
+      this.attr.color.array[i3] = g;
+      this.attr.color.array[i3 + 1] = g * 0.98;
+      this.attr.color.array[i3 + 2] = g * 0.95;
+    }
+  }
+
   update(dt) {
     const pos = this.attr.pos.array;
     const alpha = this.attr.alpha.array;
+    const size = this.attr.size.array;
     let active = 0;
 
     for (let i = 0; i < this.max; i++) {
@@ -203,7 +247,11 @@ class DebrisSystem {
       pos[i3 + 1] += this.vel[i3 + 1] * dt;
       pos[i3 + 2] += this.vel[i3 + 2] * dt;
 
-      alpha[i] = Math.min(1, this.life[i] / this.maxLife[i] * 1.6);
+      if (this.grow[i] !== 0) size[i] += this.grow[i] * dt;
+
+      const t = this.life[i] / this.maxLife[i];
+      // Ramp in over the first sliver of life so smoke does not pop into being.
+      alpha[i] = Math.min(1, t * 1.6) * Math.min(1, (1 - t) * 14 + 0.001) * this.peak[i];
     }
 
     this.activeCount = active;
@@ -362,14 +410,68 @@ class TracerPool {
 }
 
 // -------------------------------------------------------------- muzzle flash
+/**
+ * A flat untextured quad has hard edges, so at any size worth seeing it reads as
+ * a solid rectangle sitting on top of the sights. The flash is a small textured
+ * star instead: a tight bright core that falls off to nothing well inside the
+ * quad, so the geometry's own edge is never visible.
+ */
+let flashTexture = null;
+function makeFlashTexture() {
+  if (flashTexture) return flashTexture;
+  const S = 96, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const cx = S / 2, cy = S / 2;
+
+  const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, S * 0.30);
+  core.addColorStop(0.00, 'rgba(255,255,250,1)');
+  core.addColorStop(0.22, 'rgba(255,238,190,0.85)');
+  core.addColorStop(0.55, 'rgba(255,178,80,0.22)');
+  core.addColorStop(1.00, 'rgba(255,140,40,0)');
+  ctx.fillStyle = core;
+  ctx.fillRect(0, 0, S, S);
+
+  // a few soft spikes so it flickers like burning gas rather than a dot
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.translate(cx, cy);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + 0.4;
+    const len = S * (i % 2 ? 0.30 : 0.46);
+    ctx.save();
+    ctx.rotate(a);
+    const g = ctx.createLinearGradient(0, 0, len, 0);
+    g.addColorStop(0, 'rgba(255,226,160,0.55)');
+    g.addColorStop(1, 'rgba(255,160,50,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(0, -S * 0.035);
+    ctx.lineTo(len, 0);
+    ctx.lineTo(0, S * 0.035);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  flashTexture = tex;
+  return tex;
+}
+
+// Diameter in metres of the whole quad. The visible core is under half of this.
+const FLASH_SIZE = 0.075;
+const FLASH_LIFE = 0.038;
+
 class FlashPool {
   constructor(size = 6) {
     this.group = new THREE.Group();
     this.items = [];
     const geo = new THREE.PlaneGeometry(1, 1);
+    const tex = makeFlashTexture();
     for (let i = 0; i < size; i++) {
       const mat = new THREE.MeshBasicMaterial({
-        color: 0xffd08a, transparent: true, opacity: 0,
+        map: tex, color: 0xffd8a0, transparent: true, opacity: 0,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
         side: THREE.DoubleSide
       });
@@ -381,7 +483,10 @@ class FlashPool {
     }
     this.head = 0;
 
-    this.light = new THREE.PointLight(0xffc27a, 0, 14, 2);
+    // Kept deliberately weak. On a daylight snowfield a bright muzzle light
+    // blows out a quarter of the frame every round, which is its own kind of
+    // "cannot see what I am shooting at".
+    this.light = new THREE.PointLight(0xffc27a, 0, 6, 2);
     this.light.visible = false;
     this.group.add(this.light);
     this.lightLife = 0;
@@ -392,17 +497,17 @@ class FlashPool {
     this.head = (this.head + 1) % this.items.length;
 
     item.mesh.position.set(position[0], position[1], position[2]);
-    item.mesh.scale.setScalar(0.34 * scale * (0.85 + Math.random() * 0.4));
-    item.mesh.rotation.z = Math.random() * Math.PI;
+    item.mesh.scale.setScalar(FLASH_SIZE * scale * (0.82 + Math.random() * 0.45));
     if (camera) item.mesh.quaternion.copy(camera.quaternion);
-    item.mesh.material.opacity = 0.95;
+    item.mesh.rotateZ(Math.random() * Math.PI * 2);
+    item.mesh.material.opacity = 1;
     item.mesh.visible = true;
-    item.life = 0.045;
+    item.life = FLASH_LIFE;
 
     this.light.position.set(position[0], position[1], position[2]);
-    this.light.intensity = 5.5 * scale;
+    this.light.intensity = 1.6 * scale;
     this.light.visible = true;
-    this.lightLife = 0.055;
+    this.lightLife = 0.05;
   }
 
   update(dt, camera) {
@@ -414,12 +519,13 @@ class FlashPool {
         item.mesh.material.opacity = 0;
         continue;
       }
-      item.mesh.material.opacity = Math.max(0, item.life / 0.045) * 0.95;
-      if (camera) item.mesh.quaternion.copy(camera.quaternion);
+      item.mesh.material.opacity = Math.max(0, item.life / FLASH_LIFE);
+      // Re-facing every frame would undo the random roll, and the flash is gone
+      // in two frames anyway.
     }
     if (this.lightLife > 0) {
       this.lightLife -= dt;
-      this.light.intensity = Math.max(0, this.lightLife / 0.055) * 5.5;
+      this.light.intensity = Math.max(0, this.lightLife / 0.05) * 3.4;
       if (this.lightLife <= 0) this.light.visible = false;
     }
   }
@@ -505,6 +611,7 @@ export class Effects {
     scene.add(this.group);
     this.bufferHeight = 800;
     this.pixelScale = 600;
+    this._fwd = new THREE.Vector3();
   }
 
   /** Drawing-buffer height in device pixels -- gl_PointSize is in device pixels. */
@@ -528,8 +635,20 @@ export class Effects {
     this.bullets.spawn(from, to, opts);
   }
 
-  muzzleFlash(position, scale, camera) {
+  /**
+   * @param {number[]} position muzzle, world space
+   * @param {number} scale per-weapon size multiplier
+   * @param {THREE.Camera} camera billboards the flare
+   * @param {number[]} [dir] where the barrel points; the camera's forward if omitted
+   */
+  muzzleFlash(position, scale, camera, dir = null) {
     this.flashes.spawn(position, scale, camera);
+    let d = dir;
+    if (!d && camera) {
+      camera.getWorldDirection(this._fwd);
+      d = [this._fwd.x, this._fwd.y, this._fwd.z];
+    }
+    if (d) this.debris.smoke(position, d, scale);
   }
 
   ejectShell(position, right, up, forward) {

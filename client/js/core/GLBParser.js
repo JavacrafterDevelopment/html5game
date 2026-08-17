@@ -36,11 +36,19 @@ export function parseGLB(arrayBuffer) {
   }
 
   // 1. Build Materials with realistic weapon presets
+  // Authored baseColorFactors on these models sit around 0.02-0.08 linear, which is
+  // physically fine for a black rifle and completely unreadable held against snow.
+  // The presets lift them into a range where the shape still reads in shadow.
   const MAT_PRESETS = {
     'AK_Steel': { color: 0x1f2227, roughness: 0.36, metalness: 0.90 },
     'AK_Wood': { color: 0x723819, roughness: 0.44, metalness: 0.02 },
     'AK_Bakelite': { color: 0x7c2c15, roughness: 0.38, metalness: 0.04 },
-    'AK_BoltSteel': { color: 0xc4c8d0, roughness: 0.18, metalness: 0.98 }
+    'AK_BoltSteel': { color: 0xc4c8d0, roughness: 0.18, metalness: 0.98 },
+    'Mat_M4_Steel': { color: 0x2a2e33, roughness: 0.40, metalness: 0.86 },
+    'Mat_M4_BoltChrome': { color: 0xb9bec6, roughness: 0.18, metalness: 0.95 },
+    'Mat_M4_Polymer': { color: 0x23262a, roughness: 0.72, metalness: 0.04 },
+    'Mat_M4_Receiver': { color: 0x33383e, roughness: 0.44, metalness: 0.28 },
+    'Mat_M4_Accent': { color: 0x3a3f45, roughness: 0.50, metalness: 0.62 }
   };
 
   const materials = (json.materials || []).map((m) => {

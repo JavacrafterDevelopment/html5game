@@ -10,7 +10,7 @@
 import * as THREE from '../core/three.js';
 import { createSoldier } from '../characters/Soldier.js';
 import { Animator } from '../characters/Animator.js';
-import { createWeaponModel } from '../weapons/WeaponModels.js';
+import { createWeaponModel, disposeWeaponModel } from '../weapons/WeaponModels.js';
 import { STATE_BITS } from '/shared/protocol.js';
 import { NET } from '/shared/config.js';
 import { lerp, damp } from '/shared/math/num.js';
@@ -92,7 +92,9 @@ export class RemotePlayer {
   _attachWeapon(id) {
     if (this.weaponModel) {
       this.soldier.bones.weaponAnchor.remove(this.weaponModel.group);
-      this.weaponModel.group.traverse((o) => { if (o.isMesh) o.geometry?.dispose(); });
+      // Must go through the helper: GLB-backed models share geometry with the
+      // cached scene, and freeing it here would blank every later copy.
+      disposeWeaponModel(this.weaponModel);
     }
     this.weaponModel = createWeaponModel(id, { worldModel: true });
     // Models are drawn muzzle-down-Z; the soldier faces +Z, so spin it around.

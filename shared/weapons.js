@@ -41,10 +41,10 @@ export const WEAPONS = {
       spreadPerShot: 0.0075,
       spreadMax: 0.11,
       spreadRecover: 0.10,
-      recoilV: 0.0125,
-      recoilH: 0.0052,
-      recoilRecover: 7.0,
-      kickBack: 0.052,
+      recoilV: 0.0082,
+      recoilH: 0.0034,
+      recoilRecover: 7.6,
+      kickBack: 0.036,
       shakeAmount: 0.9,
       shellEject: true
     },
@@ -71,8 +71,10 @@ export const WEAPONS = {
     auto: true,
     magSize: 30,
     reserveMags: 5,
-    reloadMs: 2150,
-    reloadEmptyMs: 2850,
+    // Long enough for the reload animation to land -- the rifle has to leave the
+    // frame and a fresh one has to arrive before the magazine goes back in.
+    reloadMs: 2400,
+    reloadEmptyMs: 3000,
     range: { start: 40, end: 100, minMult: 0.70 },
     muzzleVelocity: 880,
     feel: {
@@ -86,17 +88,20 @@ export const WEAPONS = {
       spreadPerShot: 0.0058,
       spreadMax: 0.095,
       spreadRecover: 0.11,
-      recoilV: 0.0092,
-      recoilH: 0.0038,
-      recoilRecover: 8.5,
-      kickBack: 0.040,
+      recoilV: 0.0062,
+      recoilH: 0.0026,
+      recoilRecover: 9.2,
+      kickBack: 0.028,
       shakeAmount: 0.72,
       shellEject: true
     },
     audio: { pitch: 1.04, body: 150, crack: 1.0, tail: 0.45 },
+    // ads[2] is the eye-to-sight distance. The M4 model is a full-length carbine
+    // whose origin sits mid-receiver, so a large value shoves the buttstock out in
+    // front of the lens instead of behind the eye where a shouldered stock belongs.
     view: {
-      hip: [0.24, -0.20, -0.44],
-      ads: [0, -0.058, -0.28],
+      hip: [0.23, -0.20, -0.30],
+      ads: [0, -0.058, -0.235],
       hipRot: [0.02, -0.06, 0],
       scale: 1.0
     }
@@ -130,10 +135,10 @@ export const WEAPONS = {
       spreadPerShot: 0.010,
       spreadMax: 0.10,
       spreadRecover: 0.13,
-      recoilV: 0.0135,
-      recoilH: 0.0044,
-      recoilRecover: 10.0,
-      kickBack: 0.030,
+      recoilV: 0.0092,
+      recoilH: 0.0030,
+      recoilRecover: 10.8,
+      kickBack: 0.022,
       shakeAmount: 0.55,
       shellEject: true
     },
@@ -175,10 +180,10 @@ export const WEAPONS = {
       spreadPerShot: 0.02,
       spreadMax: 0.14,
       spreadRecover: 0.08,
-      recoilV: 0.048,
-      recoilH: 0.0075,
-      recoilRecover: 4.0,
-      kickBack: 0.14,
+      recoilV: 0.030,
+      recoilH: 0.0048,
+      recoilRecover: 4.6,
+      kickBack: 0.085,
       shakeAmount: 2.1,
       shellEject: false     // ejects on bolt cycle instead
     },
