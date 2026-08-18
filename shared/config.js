@@ -35,6 +35,18 @@ export const PLAYER = {
   HEAD_RADIUS: 0.17,
   HEAD_CENTER: 1.63,        // head sphere centre, metres above feet (standing)
   STEP_HEIGHT: 0.55,
+  /**
+   * The volume you take up in free fall. A player standing to attention is 1.8 m of
+   * rigid capsule that cannot duck, and threading that through a hatch means either
+   * building corridors nobody would mistake for the ISS or wedging people in the
+   * doorways. Nobody floats to attention: an astronaut in transit is tucked, so in
+   * zero-g the movement hull is a tuck.
+   *
+   * This is the MOVEMENT hull only. Shots are still traced against the full-size
+   * capsule and head sphere above, so nothing about aiming changes.
+   */
+  FLIGHT_HEIGHT: 0.92,
+  FLIGHT_RADIUS: 0.40,
   // Server-side sanity check. Generous so legitimate players are never rubber-banded.
   MAX_SPEED_TOLERANCE: 1.9
 };

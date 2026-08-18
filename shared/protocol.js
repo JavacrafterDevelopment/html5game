@@ -12,7 +12,7 @@
 // ---- client -> server ----
 export const C = {
   JOIN: 'join',            // { name, primary }
-  INPUT: 'input',          // { seq, p:[x,y,z], y:yaw, t:pitch, st:stateBits, wp:weaponId }
+  INPUT: 'input',          // { seq, p:[x,y,z], y:yaw, t:pitch, r:roll, st:stateBits, wp:weaponId }
   FIRE: 'fire',            // { o:[x,y,z], d:[x,y,z], md:maxDist, wp:weaponId, seq }
   RELOAD: 'reload',        // { wp }
   SWITCH: 'switch',        // { wp }

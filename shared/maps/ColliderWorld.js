@@ -17,12 +17,22 @@
  * is bigger than the object, and that gap is exactly what an invisible wall is.
  */
 
-import { rayAABB, raySphere, rayCylinderY } from '../math/trace.js';
+import { rayAABB, raySphere, rayCylinderY, rayTube } from '../math/trace.js';
 
-const TYPE_BOX = 0, TYPE_CYL = 1, TYPE_SPHERE = 2;
+const TYPE_BOX = 0, TYPE_CYL = 1, TYPE_SPHERE = 2, TYPE_TUBE = 3;
 const CELL = 8;
 
-export function createColliderWorld({ heightAt, normalAt, hardRadius, kinds }) {
+/** World axis indices of a tube's two perpendicular coordinates, (u, v). */
+const PERP = [[1, 2], [0, 2], [0, 1]];
+
+/**
+ * @param {object} opts
+ * @param {boolean} [opts.hasTerrain] false for a world with no ground at all (orbit).
+ *   Skips the heightfield entirely rather than faking one far below, which would
+ *   otherwise cost a terrain march on every single bullet.
+ * @param {number} [opts.hardY] optional vertical backstop, mirroring hardRadius.
+ */
+export function createColliderWorld({ heightAt, normalAt, hardRadius, kinds, hasTerrain = true, hardY = Infinity }) {
   const colliders = [];
   const grid = new Map();
   const cellKey = (ix, iz) => ix * 100003 + iz;
@@ -36,6 +46,13 @@ export function createColliderWorld({ heightAt, normalAt, hardRadius, kinds }) {
   }
   function addSphere(x, y, z, r, kind) {
     colliders.push({ type: TYPE_SPHERE, x, y, z, r, kind });
+  }
+  /**
+   * A tube: an axis-aligned cylinder with an open bore. Pass rIn = 0 for a solid
+   * cylinder or a bulkhead disc. See rayTube for the (u, v) convention.
+   */
+  function addTube(axis, u, v, from, to, rIn, rOut, kind) {
+    colliders.push({ type: TYPE_TUBE, axis, u, v, from, to, rIn, rOut, kind });
   }
 
   function index(i, minX, minZ, maxX, maxZ) {
@@ -55,9 +72,19 @@ export function createColliderWorld({ heightAt, normalAt, hardRadius, kinds }) {
     grid.clear();
     colliders.forEach((c, i) => {
       if (c.type === TYPE_BOX) index(i, c.min[0], c.min[2], c.max[0], c.max[2]);
-      else index(i, c.x - c.r, c.z - c.r, c.x + c.r, c.z + c.r);
+      else if (c.type === TYPE_TUBE) {
+        const b = tubeBoundsXZ(c);
+        index(i, b[0], b[1], b[2], b[3]);
+      } else index(i, c.x - c.r, c.z - c.r, c.x + c.r, c.z + c.r);
     });
     built = true;
+  }
+
+  /** A tube's footprint on the XZ grid. */
+  function tubeBoundsXZ(c) {
+    if (c.axis === 0) return [c.from, c.v - c.rOut, c.to, c.v + c.rOut];
+    if (c.axis === 2) return [c.u - c.rOut, c.from, c.u + c.rOut, c.to];
+    return [c.u - c.rOut, c.v - c.rOut, c.u + c.rOut, c.v + c.rOut];
   }
 
   const scratch = [];
@@ -100,8 +127,15 @@ export function createColliderWorld({ heightAt, normalAt, hardRadius, kinds }) {
         const c = colliders[idx];
         if (c.type === TYPE_BOX) resolveBox(pos, radius, height, c, stepHeight, result);
         else if (c.type === TYPE_CYL) resolveCylinder(pos, radius, height, c, stepHeight, result);
+        else if (c.type === TYPE_TUBE) resolveTube(pos, radius, height, c, result);
         else resolveSphere(pos, radius, height, c, result);
       }
+    }
+
+    if (!hasTerrain) {
+      if (pos[1] > hardY) { pos[1] = hardY; result.hitWall = true; }
+      else if (pos[1] < -hardY) { pos[1] = -hardY; result.hitWall = true; }
+      return result;
     }
 
     const gh = heightAt(pos[0], pos[2]);
@@ -190,6 +224,112 @@ export function createColliderWorld({ heightAt, normalAt, hardRadius, kinds }) {
     }
   }
 
+  /**
+   * Capsule vs tube.
+   *
+   * Two surfaces, and which one applies depends on which side of the wall you are
+   * on: the OUTER skin has to clear the nearest point of the capsule, while the
+   * bore has to contain its FARTHEST point. Getting that backwards is what makes a
+   * player standing upright in a horizontal module rise gently through the ceiling,
+   * because the middle of a 1.8 m capsule is always the closest bit to the axis.
+   *
+   * A hollow tube is never resolved along its own axis: those ends are open hatches
+   * and pushing somebody back out of one would be an invisible wall. A solid tube
+   * (rIn = 0, i.e. a bulkhead disc or a strut) does resolve axially, or you could
+   * never land on the flat face of one.
+   */
+  function resolveTube(pos, radius, height, c, result) {
+    const a = c.axis;
+    const [iu, iv] = PERP[a];
+    // A hollow tube's ends are open, so its span is measured against the capsule's
+    // centre line and nothing more. Padding it by the capsule radius would let a
+    // module reach 35 cm past its own hatch and grab somebody who is really in the
+    // module next door -- which at a right-angle junction means two tubes fighting
+    // over the same body and flinging it out through the wall. A solid tube keeps
+    // the pad: its ends are faces you are meant to bump into.
+    const pad = c.rIn > 0 ? 0 : radius;
+    const capMin = (a === 1 ? pos[1] : pos[a] - pad);
+    const capMax = (a === 1 ? pos[1] + height : pos[a] + pad);
+    if (capMax <= c.from || capMin >= c.to) return;
+
+    // Perpendicular offsets at the nearest and farthest points of the capsule's
+    // centre line. They only differ for a tube that runs horizontally, where the
+    // upright capsule crosses the section instead of sitting in it as a disc.
+    let nu, nv, fu, fv;
+    if (a === 1) {
+      nu = fu = pos[iu] - c.u;
+      nv = fv = pos[iv] - c.v;
+    } else {
+      const yIsU = iu === 1;
+      const cy = yIsU ? c.u : c.v;
+      const y0 = pos[1], y1 = pos[1] + height;
+      const yNear = cy < y0 ? y0 : cy > y1 ? y1 : cy;
+      const yFar = Math.abs(y0 - cy) > Math.abs(y1 - cy) ? y0 : y1;
+      if (yIsU) {
+        nu = yNear - c.u; fu = yFar - c.u;
+        nv = fv = pos[iv] - c.v;
+      } else {
+        nu = fu = pos[iu] - c.u;
+        nv = yNear - c.v; fv = yFar - c.v;
+      }
+    }
+
+    const dNear = Math.hypot(nu, nv);
+    const dFar = Math.hypot(fu, fv);
+    const bore = c.rIn > radius ? c.rIn : 0;      // a bore too narrow to fit is solid
+
+    if (bore > 0 && dFar <= bore - radius) return;   // clear inside the bore
+    if (dNear >= c.rOut + radius) return;            // clear outside the hull
+
+    // Least-penetration wins, exactly as the box resolver does it -- with one
+    // veto. If the nearest part of the capsule is inside the bore then some of the
+    // body is in the passage, and the only sane answer is to keep it there; pushing
+    // "out" from there means out through the hull.
+    const outPush = (bore > 0 && dNear < bore) ? Infinity : c.rOut + radius - dNear;
+    const inPush = bore > 0 ? dFar - (bore - radius) : Infinity;
+    const axialLo = bore > 0 ? Infinity : capMax - c.from;
+    const axialHi = bore > 0 ? Infinity : c.to - capMin;
+    const best = Math.min(outPush, inPush, axialLo, axialHi);
+
+    if (best === axialLo || best === axialHi) {
+      const delta = best === axialLo ? -best : best;
+      if (a === 1) {
+        pos[1] += delta;
+        if (delta > 0) { result.grounded = true; if (pos[1] > result.groundY) result.groundY = pos[1]; }
+        else result.ceiling = true;
+      } else {
+        pos[a] += delta;
+        result.hitWall = true;
+      }
+      return;
+    }
+
+    let ux, uv, delta;
+    if (best === inPush) {
+      const d = dFar || 1;
+      ux = -fu / d; uv = -fv / d; delta = inPush;
+    } else {
+      const d = dNear || 1;
+      ux = dNear < 1e-6 ? 1 : nu / d;
+      uv = dNear < 1e-6 ? 0 : nv / d;
+      delta = outPush;
+    }
+    pos[iu] += ux * delta;
+    pos[iv] += uv * delta;
+
+    // Whichever of the two moved axes was Y decides how it reads to the controller.
+    const yPush = iu === 1 ? ux * delta : iv === 1 ? uv * delta : 0;
+    if (yPush > Math.abs(iu === 1 ? uv * delta : ux * delta)) {
+      result.grounded = true;
+      if (pos[1] > result.groundY) result.groundY = pos[1];
+    } else if (yPush < 0) {
+      result.ceiling = true;
+      result.hitWall = true;
+    } else {
+      result.hitWall = true;
+    }
+  }
+
   // ------------------------------------------------------------ raycasting
   function raycastTerrain(ox, oy, oz, dx, dy, dz, maxDist) {
     let t = 0, prevT = 0;
@@ -243,6 +383,8 @@ export function createColliderWorld({ heightAt, normalAt, hardRadius, kinds }) {
             t = rayAABB(ox, oy, oz, dx, dy, dz, c.min[0], c.min[1], c.min[2], c.max[0], c.max[1], c.max[2], bestT);
           } else if (c.type === TYPE_CYL) {
             t = rayCylinderY(ox, oy, oz, dx, dy, dz, c.x, c.z, c.r, c.y0, c.y1, bestT);
+          } else if (c.type === TYPE_TUBE) {
+            t = rayTube(ox, oy, oz, dx, dy, dz, c.axis, c.u, c.v, c.from, c.to, c.rIn, c.rOut, bestT);
           } else {
             t = raySphere(ox, oy, oz, dx, dy, dz, c.x, c.y, c.z, c.r, bestT);
           }
@@ -254,7 +396,7 @@ export function createColliderWorld({ heightAt, normalAt, hardRadius, kinds }) {
       if (travelled > maxDist) break;
     }
 
-    const tTerrain = raycastTerrain(ox, oy, oz, dx, dy, dz, Math.min(bestT, maxDist));
+    const tTerrain = hasTerrain ? raycastTerrain(ox, oy, oz, dx, dy, dz, Math.min(bestT, maxDist)) : -1;
     if (tTerrain >= 0 && tTerrain < bestT) {
       const px = ox + dx * tTerrain, py = oy + dy * tTerrain, pz = oz + dz * tTerrain;
       return { dist: tTerrain, point: [px, py, pz], normal: normalAt(px, pz), kind: kinds.TERRAIN };
@@ -266,6 +408,22 @@ export function createColliderWorld({ heightAt, normalAt, hardRadius, kinds }) {
   }
 
   function colliderNormal(c, px, py, pz) {
+    if (c.type === TYPE_TUBE) {
+      const a = c.axis;
+      const [iu, iv] = PERP[a];
+      const p = [px, py, pz];
+      const av = p[a];
+      // A flat end reads as a cap; anything else is the barrel, inside or out.
+      if (Math.abs(av - c.from) < 1e-3) return a === 0 ? [-1, 0, 0] : a === 1 ? [0, -1, 0] : [0, 0, -1];
+      if (Math.abs(av - c.to) < 1e-3) return a === 0 ? [1, 0, 0] : a === 1 ? [0, 1, 0] : [0, 0, 1];
+      const du = p[iu] - c.u, dv = p[iv] - c.v;
+      const d = Math.hypot(du, dv) || 1;
+      const sign = Math.abs(d - c.rOut) <= Math.abs(d - c.rIn) ? 1 : -1;
+      const n = [0, 0, 0];
+      n[iu] = (du / d) * sign;
+      n[iv] = (dv / d) * sign;
+      return n;
+    }
     if (c.type === TYPE_SPHERE) {
       const nx = px - c.x, ny = py - c.y, nz = pz - c.z;
       const l = Math.hypot(nx, ny, nz) || 1;
@@ -293,7 +451,7 @@ export function createColliderWorld({ heightAt, normalAt, hardRadius, kinds }) {
   }
 
   return {
-    addBox, addCylinder, addSphere, build,
+    addBox, addCylinder, addSphere, addTube, build,
     collideCapsule, raycastWorld, raycastTerrain, isBlocked,
     get count() { return colliders.length; },
     colliders

@@ -90,7 +90,7 @@
   check('impact debris spawns', g.effects.debris.activeCount > before);
 
   g.effects.tracer([0, 5, 0], [0, 5, 20], {});
-  check('tracer pool fires', g.effects.tracers.items.some((i) => i.life > 0));
+  check('tracer pool fires', g.effects.bullets.items.some((i) => i.active));
 
   const smokeBefore = g.effects.debris.activeCount;
   g.effects.muzzleFlash([g.player.pos[0], g.player.pos[1] + 1.5, g.player.pos[2]], 1, g.camera);
@@ -109,10 +109,12 @@
   try { g._render(); } catch (e) { e2 = e.message; }
   check('frame still renders with effects active', !e2, e2 || '');
 
-  // ---- 4. snowfall ----
-  check('snowfall present', !!g.map.snow?.group.parent);
-  check('snowfall tracks the camera',
-    g.map.snow.far.material.uniforms.uCamPos.value.distanceTo(g.camera.position) < 0.01);
+  // ---- 4. weather, on the maps that have any ----
+  if (g.map.snow) {
+    check('snowfall present', !!g.map.snow.group.parent);
+    check('snowfall tracks the camera',
+      g.map.snow.far.material.uniforms.uCamPos.value.distanceTo(g.camera.position) < 0.01);
+  }
 
   // ---- 5. scope ----
   const prevWeapon = g.weapons.weaponId;
@@ -142,11 +144,19 @@
     Math.hypot(rag.p.pelvis.pos.x - bx, rag.p.pelvis.pos.z - bz) < 2.5,
     `${Math.hypot(rag.p.pelvis.pos.x - bx, rag.p.pelvis.pos.z - bz).toFixed(2)} m away`);
 
+  const dropY = rag.p.pelvis.pos.y;
   for (let i = 0; i < 200; i++) rag.update(1 / 60);
-  const T = await import('/shared/maps/snowy_forest/terrain.js');
-  let sunk = 0;
-  for (const p of Object.values(rag.p)) sunk = Math.min(sunk, p.pos.y - T.heightAt(p.pos.x, p.pos.z));
-  check('settled ragdoll stays above ground', sunk > -0.05, `${sunk.toFixed(3)} m`);
+  const M = await import('/shared/maps/active.js');
+  if (M.mapInfo().environment.gravityScale === 0) {
+    // In orbit a body does not settle -- it drifts. Falling is the failure here.
+    check('a body in free fall does not sink toward a floor that is not there',
+      rag.p.pelvis.pos.y > dropY - 0.6,
+      `${(rag.p.pelvis.pos.y - dropY).toFixed(2)} m after 3.3 s`);
+  } else {
+    let sunk = 0;
+    for (const p of Object.values(rag.p)) sunk = Math.min(sunk, p.pos.y - M.heightAt(p.pos.x, p.pos.z));
+    check('settled ragdoll stays above ground', sunk > -0.05, `${sunk.toFixed(3)} m`);
+  }
   check('ragdoll limbs stay attached',
     Math.abs(rag.p.shoulderL.pos.distanceTo(rag.p.elbowL.pos)
       - rag.links.find((l) => l.a === 'shoulderL' && l.b === 'elbowL').rest) < 0.05);
@@ -179,6 +189,80 @@
       }
     }
     check('cave rock stays inside its collision volume', over < 0.15, `overhang ${over.toFixed(2)} m`);
+  }
+
+  // ---- 6c. the ISS, if that is the map we are on ----
+  // Only runs when the server is actually on it; type /map iss first.
+  if (g.mapId === 'iss') {
+    const THREE = await import('/client/vendor/three.module.js');
+    const active = await import('/shared/maps/active.js');
+    const iss = await import('/shared/maps/iss/index.js');
+
+    check('zero-g movement is active', active.movement().mode === 'zerog');
+    check('the crew are astronauts', active.characterStyle() === 'astronaut');
+    check('there is no fog in vacuum', g.scene.fog === null);
+
+    // Side thrusters. The bank has to PERSIST -- a roll that springs back to level
+    // is a lean, and the point of this map is being able to fly upside down.
+    const st = { move: { x: 0, z: 0 }, jump: false, crouch: false, sprint: false,
+      roll: 1, lift: 0, ads: false, speedMult: 1, frozen: false };
+    g.player.pos = [0, -0.46, -12];
+    g.player.roll = 0;
+    for (let i = 0; i < 110; i++) g.player.update(1 / 60, st);
+    const rolled = g.player.roll;
+    st.roll = 0;
+    for (let i = 0; i < 120; i++) g.player.update(1 / 60, st);
+    check('Q/E roll the player past inverted', Math.abs(rolled) > 2.6,
+      `${(rolled * 57.3).toFixed(0)} deg after 1.8 s`);
+    check('the bank stays where it is left', Math.abs(g.player.roll - rolled) < 0.25,
+      `drifted ${((g.player.roll - rolled) * 57.3).toFixed(1)} deg in 2 s`);
+    const upY = new THREE.Vector3(0, 1, 0).applyQuaternion(g.camera.quaternion).y;
+    check('the camera actually turns over with it', upY < -0.7, `camera up.y ${upY.toFixed(2)}`);
+    g.player.roll = 0;
+
+    // W and S still mean forward and back -- they just follow where you look.
+    g.player.pos = [0, -0.46, -12];
+    g.player.vel.set(0, 0, 0);
+    g.player.yaw = 0; g.player.pitch = 0;
+    const fwd = { ...st, move: { x: 0, z: 1 } };
+    for (let i = 0; i < 60; i++) g.player.update(1 / 60, fwd);
+    check('W drives you along the way you are looking', g.player.pos[2] < -14,
+      `travelled ${(-12 - g.player.pos[2]).toFixed(1)} m in a second`);
+
+    // Nothing floats and nothing is drawn outside what stops a bullet. This is the
+    // check the plains map never had: fire rays at the station from every side and
+    // demand that the drawn surface and the collision surface agree. Anything drawn
+    // WELL PROUD of its collider is scenery you can fly through.
+    const rc = new THREE.Raycaster();
+    const origin = new THREE.Vector3(), dir = new THREE.Vector3(), target = new THREE.Vector3();
+    const b = iss.STATION_BOUNDS;
+    let compared = 0, worst = 0, ghosts = [];
+    for (let i = 0; i < 700; i++) {
+      const a1 = Math.random() * Math.PI * 2, e = (Math.random() - 0.5) * Math.PI;
+      origin.set(Math.cos(a1) * Math.cos(e), Math.sin(e), Math.sin(a1) * Math.cos(e)).multiplyScalar(74);
+      target.set(
+        b.min[0] + Math.random() * (b.max[0] - b.min[0]),
+        b.min[1] + Math.random() * (b.max[1] - b.min[1]),
+        b.min[2] + Math.random() * (b.max[2] - b.min[2]));
+      dir.subVectors(target, origin).normalize();
+      rc.set(origin, dir);
+      const hit = rc.intersectObject(g.map.station, true)[0];
+      if (!hit) continue;
+      const solid = iss.raycastWorld(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, 400);
+      compared++;
+      // Drawn surface in FRONT of the collider by more than a handrail's depth.
+      const proud = solid ? solid.dist - hit.distance : 999;
+      if (proud > worst) worst = proud;
+      if (proud > 0.3 && ghosts.length < 6) {
+        ghosts.push(`${hit.object.name} ${proud.toFixed(2)}m proud`);
+      }
+    }
+    check('drawn geometry never sticks out past its collider', ghosts.length === 0,
+      ghosts.length ? ghosts.join('; ') : `${compared} rays, worst overhang ${worst.toFixed(2)} m`);
+
+    // The stack is a clear shot end to end, which is what makes it a corridor.
+    const through = iss.raycastWorld(0, 0, -8, 0, 0, -1, 400);
+    check('the pressurised stack is a clear sight line', through === null);
   }
 
   // ---- 7. hardcore rules ----

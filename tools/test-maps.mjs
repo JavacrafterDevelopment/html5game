@@ -15,6 +15,8 @@
 
 import assert from 'node:assert';
 import { MAPS } from '../shared/maps/index.js';
+import { createColliderWorld } from '../shared/maps/ColliderWorld.js';
+import { KIND } from '../shared/maps/kinds.js';
 import { PLAYER, MOVE } from '../shared/config.js';
 
 let checks = 0;
@@ -33,6 +35,11 @@ function nearestSurfaceGap(colliders, x, z, y) {
     } else if (c.type === 1) {                // cylinder
       if (y + PLAYER.HEIGHT <= c.y0 || y >= c.y1) continue;
       gap = Math.hypot(x - c.x, z - c.z) - c.r;
+    } else if (c.type === 3) {                // tube
+      // Only the ones standing on end can be reached by a horizontal probe.
+      if (c.axis !== 1) continue;
+      if (y + PLAYER.HEIGHT <= c.from || y >= c.to) continue;
+      gap = Math.abs(Math.hypot(x - c.u, z - c.v) - c.rOut);
     } else {                                  // sphere
       const dy = Math.max(c.y - (y + PLAYER.HEIGHT), 0, y - c.y);
       const r = Math.sqrt(Math.max(0, c.r * c.r - dy * dy));
@@ -239,7 +246,163 @@ function testHuts(map) {
   ok(`all ${HUTS.length} huts are enterable and stand-up-able`);
 }
 
+/**
+ * A map with no ground fails every assumption above, so it gets its own suite.
+ *
+ * The failure this one is written to catch is the opposite of an invisible wall:
+ * a hull with a gap in it. A pressurised module is a hollow tube, and a hollow
+ * shape is only as sealed as the arithmetic that produced it -- there is no mesh
+ * to eyeball. Fly at the inside of it from every direction and prove nobody gets
+ * out except through a door.
+ */
+function testOrbit(id, map) {
+  console.log(`\n--- ${id} (${map.MAP_INFO.name}) --- zero-g`);
+  const { STATION_PARTS, partBounds, collideCapsule, SPAWN_POINTS, TERRAIN, BORE } = map;
+  const R = PLAYER.FLIGHT_RADIUS, H = PLAYER.FLIGHT_HEIGHT;
+  const dt = 1 / 60;
+
+  // ------------------------------------------------ 1. nothing floats
+  // Every part has to touch another one. This is the check that the plains map
+  // never had, and the reason it grew fences standing in mid-air.
+  const bounds = STATION_PARTS.map(partBounds);
+  const touching = (a, b, tol = 0.06) =>
+    a.min[0] - tol <= b.max[0] && b.min[0] - tol <= a.max[0] &&
+    a.min[1] - tol <= b.max[1] && b.min[1] - tol <= a.max[1] &&
+    a.min[2] - tol <= b.max[2] && b.min[2] - tol <= a.max[2];
+  const seen = new Set([0]);
+  const stack = [0];
+  while (stack.length) {
+    const i = stack.pop();
+    for (let j = 0; j < bounds.length; j++) {
+      if (!seen.has(j) && touching(bounds[i], bounds[j])) { seen.add(j); stack.push(j); }
+    }
+  }
+  const floating = STATION_PARTS.filter((_, i) => !seen.has(i)).map((p) => p.name);
+  assert.strictEqual(floating.length, 0, `parts attached to nothing: ${floating.join(', ')}`);
+  ok(`all ${STATION_PARTS.length} parts are attached to the structure`);
+
+  // ------------------------------------------------ 2. the hull is sealed
+  // Built again with the doorways plugged, so that ANY escape is a defect. The
+  // doorways are proved separately in step 3.
+  const sealed = createColliderWorld({
+    heightAt: () => -1e6, normalAt: () => [0, 1, 0],
+    hardRadius: 900, hardY: 900, hasTerrain: false, kinds: KIND
+  });
+  for (const p of STATION_PARTS) {
+    if (p.s === 'tube') sealed.addTube(p.axis, p.u, p.v, p.from, p.to, p.rIn, p.rOut, p.kind);
+    else sealed.addBox(p.min, p.max, p.kind);
+  }
+  for (const d of map.DOORWAYS) sealed.addTube(d.axis, d.u, d.v, d.from, d.to, 0, d.r, KIND.HULL);
+  sealed.build();
+
+  // The pressurised volume: every tube bore, plus the middle of each node, which
+  // no single collar bore covers.
+  const hubs = STATION_PARTS.filter((p) => p.look === 'collar' && /-collar\+x$/.test(p.name))
+    .map((p) => [p.from - 2.05, p.u, p.v]);
+  const inside = (p, tol = 0.5) => {
+    for (const [hx, hy, hz] of hubs) {
+      if (Math.abs(p[0] - hx) <= 2.05 + tol && Math.abs(p[1] - hy) <= 2.05 + tol &&
+          Math.abs(p[2] - hz) <= 2.05 + tol) return true;
+    }
+    for (const t of STATION_PARTS) {
+      if (t.s !== 'tube' || t.rIn <= 0) continue;
+      const a = p[t.axis];
+      if (a < t.from - tol || a > t.to + tol) continue;
+      const perp = t.axis === 0 ? [1, 2] : t.axis === 1 ? [0, 2] : [0, 1];
+      if (Math.hypot(p[perp[0]] - t.u, p[perp[1]] - t.v) <= t.rIn + tol) return true;
+    }
+    return false;
+  };
+
+  const DIRS = 1200;
+  let escapes = 0;
+  let worst = null;
+  for (const start of map.INTERIOR_PROBES) {
+    for (let i = 0; i < DIRS; i++) {
+      // Fibonacci-ish sphere, so the sample is even rather than clumped at a pole.
+      const u = (i + 0.5) / DIRS, phi = Math.acos(1 - 2 * u), th = i * 2.399963;
+      const d = [Math.sin(phi) * Math.cos(th), Math.cos(phi), Math.sin(phi) * Math.sin(th)];
+      const pos = [start[0], start[1] - H * 0.5, start[2]];
+      for (let step = 0; step < 420; step++) {
+        pos[0] += d[0] * 14 * dt;
+        pos[1] += d[1] * 14 * dt;
+        pos[2] += d[2] * 14 * dt;
+        sealed.collideCapsule(pos, R, H, 0);
+      }
+      if (!inside([pos[0], pos[1] + H * 0.5, pos[2]])) {
+        escapes++;
+        if (!worst) worst = { from: start, dir: d.map((v) => +v.toFixed(2)), to: pos.map((v) => +v.toFixed(1)) };
+      }
+    }
+  }
+  assert.strictEqual(escapes, 0,
+    `${escapes} of ${map.INTERIOR_PROBES.length * DIRS} flights left the pressurised hull through a wall: ${JSON.stringify(worst)}`);
+  ok(`hull is sealed: 0 escapes in ${map.INTERIOR_PROBES.length * DIRS} flights from ${map.INTERIOR_PROBES.length} compartments`);
+
+  // ------------------------------------------------ 3. the doorways are open
+  // The other half of the same coin. A station you cannot get into is scenery.
+  const fly = (from, dir, steps = 900) => {
+    const pos = from.slice();
+    for (let i = 0; i < steps; i++) {
+      pos[0] += dir[0] * 12 * dt;
+      pos[1] += dir[1] * 12 * dt;
+      pos[2] += dir[2] * 12 * dt;
+      collideCapsule(pos, R, H, 0);
+    }
+    return pos;
+  };
+  // Out of the node the airlock actually hangs off, down its real centreline.
+  const home = [map.NODES[1].x, map.NODES[1].y - H * 0.5, map.NODES[1].z];
+  const fore = fly([0, -H * 0.5, -42], [0, 0, 1]);
+  assert.ok(fore[2] > 40,
+    `could not fly the length of the stack from the forward hatch (stopped at z=${fore[2].toFixed(1)})`);
+  const aft = fly([0, -H * 0.5, 42], [0, 0, -1]);
+  assert.ok(aft[2] < -40,
+    `could not fly the length of the stack from the aft hatch (stopped at z=${aft[2].toFixed(1)})`);
+  ok('the stack is a through-tunnel: forward hatch to aft hatch, both ways');
+
+  const out = fly(home.slice(), [1, 0, 0]);
+  assert.ok(out[0] > 12, `could not fly out of the airlock (stopped at x=${out[0].toFixed(1)})`);
+  ok(`the airlock is open: reached ${out[0].toFixed(1)} m outboard from the node`);
+
+  // ------------------------------------------------ 4. spawns are in clear space
+  const bad = [];
+  for (const sp of SPAWN_POINTS) {
+    const pos = [sp.x, sp.y, sp.z];
+    collideCapsule(pos, R, H, 0);
+    const moved = Math.hypot(pos[0] - sp.x, pos[1] - sp.y, pos[2] - sp.z);
+    if (moved > 0.02) bad.push({ x: +sp.x.toFixed(1), y: +sp.y.toFixed(1), z: +sp.z.toFixed(1) });
+  }
+  assert.strictEqual(bad.length, 0, `spawns inside structure: ${JSON.stringify(bad.slice(0, 5))}`);
+  assert.ok(SPAWN_POINTS.length >= 20, `only ${SPAWN_POINTS.length} usable spawn points`);
+  ok(`all ${SPAWN_POINTS.length} spawn points are in clear space`);
+
+  // ------------------------------------------------ 5. open space really is open
+  // The inverse of the ground map's phantom-push test: out here, away from the
+  // station, absolutely nothing may touch you.
+  let touched = 0;
+  for (let i = 0; i < 4000; i++) {
+    const a = Math.random() * Math.PI * 2, e = (Math.random() - 0.5) * Math.PI;
+    // Beyond 62 m nothing on the station reaches, and inside the soft boundary so
+    // the map's own edge is not what is being measured.
+    const rad = 62 + Math.random() * (TERRAIN.playRadius - 66);
+    const p = [Math.cos(a) * Math.cos(e) * rad, Math.sin(e) * rad, Math.sin(a) * Math.cos(e) * rad];
+    const before = p.slice();
+    collideCapsule(p, R, H, 0);
+    if (Math.hypot(p[0] - before[0], p[1] - before[1], p[2] - before[2]) > 0.001) touched++;
+  }
+  assert.strictEqual(touched, 0, `${touched} points in empty space pushed the player -- invisible walls`);
+  ok('4000 points of empty space beyond the structure, 0 contacts');
+
+  assert.ok(BORE * 2 > PLAYER.FLIGHT_HEIGHT + 1.0, 'the bore is too tight to fly a body down');
+  ok(`bore is ${(BORE * 2).toFixed(1)} m across, comfortably wider than a tucked body`);
+}
+
 for (const [id, map] of Object.entries(MAPS)) {
+  if (map.MAP_INFO.movement?.mode === 'zerog') {
+    testOrbit(id, map);
+    continue;
+  }
   testMap(id, map);
   if (map.CHAMBER) testCave(map);
   if (map.HUTS) testHuts(map);

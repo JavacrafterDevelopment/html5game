@@ -12,11 +12,14 @@ import { createSoldier } from '../characters/Soldier.js';
 import { Animator } from '../characters/Animator.js';
 import { createWeaponModel, disposeWeaponModel } from '../weapons/WeaponModels.js';
 import { STATE_BITS } from '/shared/protocol.js';
-import { NET } from '/shared/config.js';
+import { NET, PLAYER } from '/shared/config.js';
+import { movement, characterStyle } from '/shared/maps/active.js';
 import { lerp, damp } from '/shared/math/num.js';
 
 const NAME_FADE_START = 26;
 const NAME_FADE_END = 46;
+/** Roughly mid-torso on the rig: where a floating body wants to pivot. */
+const FLOAT_PIVOT = 1.15;
 
 function makeNameplate(name) {
   const canvas = document.createElement('canvas');
@@ -63,6 +66,7 @@ export class RemotePlayer {
     this.prevRenderPos = new THREE.Vector3();
     this.renderYaw = 0;
     this.renderPitch = 0;
+    this.renderRoll = 0;
     this.speed = 0;
     this.alive = true;
     this.weaponId = opts.weaponId || 'ak47';
@@ -82,11 +86,32 @@ export class RemotePlayer {
   }
 
   _buildBody() {
-    this.soldier = createSoldier({ shadows: this.shadows });
+    // The map decides what people look like. On the ground that is a soldier; in
+    // orbit it is the same rig in an EMU, which is why the animator and the ragdoll
+    // need to know nothing about it.
+    this.soldier = createSoldier({ shadows: this.shadows, style: characterStyle() });
     this.animator = new Animator(this.soldier);
     this.animator.reset();
-    this.container.add(this.soldier.group);
+    // A body that can be any way up needs a frame of its own: the nameplate has to
+    // stay the right way up above somebody who is flying inverted.
+    this.body = new THREE.Group();
+    this.body.add(this.soldier.group);
+    this.container.add(this.body);
     this._attachWeapon(this.weaponId);
+  }
+
+  /** Rebuild after a map change, in case the map wants a different-looking crew. */
+  rebuildBody() {
+    if (this.soldier) {
+      if (this.weaponModel) {
+        this.soldier.bones.weaponAnchor.remove(this.weaponModel.group);
+        disposeWeaponModel(this.weaponModel);
+        this.weaponModel = null;
+      }
+      this.container.remove(this.body);
+      this.soldier.group.traverse((o) => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+    }
+    this._buildBody();
   }
 
   _attachWeapon(id) {
@@ -117,7 +142,7 @@ export class RemotePlayer {
     this.buffer.push({
       t,
       x: s.p[0], y: s.p[1], z: s.p[2],
-      yaw: s.y, pitch: s.t,
+      yaw: s.y, pitch: s.t, roll: s.r || 0,
       state: s.s,
       alive: isAlive
     });
@@ -149,6 +174,7 @@ export class RemotePlayer {
       this.renderPos.set(s.x, s.y, s.z);
       this.renderYaw = s.yaw;
       this.renderPitch = s.pitch;
+      this.renderRoll = s.roll;
       this.state = s.state;
       this.alive = s.alive;
     } else {
@@ -166,6 +192,7 @@ export class RemotePlayer {
       this.renderPos.set(lerp(a.x, b.x, f), lerp(a.y, b.y, f), lerp(a.z, b.z, f));
       this.renderYaw = lerpAngle(a.yaw, b.yaw, f);
       this.renderPitch = lerp(a.pitch, b.pitch, f);
+      this.renderRoll = lerpAngle(a.roll, b.roll, f);
       this.state = f < 0.5 ? a.state : b.state;
       this.alive = f < 0.5 ? a.alive : b.alive;
     }
@@ -186,6 +213,19 @@ export class RemotePlayer {
     this.container.position.copy(this.renderPos);
     // The soldier is modelled facing +Z; network yaw 0 means facing -Z.
     this.container.rotation.y = this.renderYaw + Math.PI;
+
+    // In free flight there is no ground to stand the rig on, so it hangs off the
+    // player's midriff instead of their feet and takes the pitch and the bank with
+    // it. Somebody flying head-first down a module has to LOOK like it.
+    if (movement().mode === 'zerog') {
+      this.body.position.set(0, PLAYER.FLIGHT_HEIGHT * 0.5, 0);
+      this.body.rotation.set(-this.renderPitch, 0, -this.renderRoll);
+      this.soldier.group.position.y = -FLOAT_PIVOT;
+    } else if (this.body.rotation.x !== 0 || this.body.position.y !== 0) {
+      this.body.position.set(0, 0, 0);
+      this.body.rotation.set(0, 0, 0);
+      this.soldier.group.position.y = 0;
+    }
 
     const bits = this.state || 0;
     this.animator.update(dt, {
@@ -244,7 +284,8 @@ export class RemotePlayer {
     this.container.updateMatrixWorld(true);
     soldier.group.updateMatrixWorld(true);
     const worldMatrix = soldier.group.matrixWorld.clone();
-    this.container.remove(soldier.group);
+    this.body.remove(soldier.group);
+    this.container.remove(this.body);
     worldMatrix.decompose(soldier.group.position, soldier.group.quaternion, soldier.group.scale);
     soldier.group.updateMatrixWorld(true);
     // The weapon goes down with the body -- it is parented to the rig.

@@ -66,6 +66,19 @@ export function isBlocked(ox, oy, oz, tx, ty, tz) {
 
 export function spawnPoints() { return active.SPAWN_POINTS; }
 export function mapInfo() { return active.MAP_INFO; }
+
+/**
+ * How players move on this map. Maps that do not say get the default: feet on the
+ * ground, gravity on. The ISS says 'zerog' and the controller changes behaviour
+ * without ever having to name the map.
+ */
+export function movement() {
+  return active.MAP_INFO.movement || DEFAULT_MOVEMENT;
+}
+const DEFAULT_MOVEMENT = { mode: 'ground' };
+
+/** Character style the map wants: 'soldier' by default, 'astronaut' up in orbit. */
+export function characterStyle() { return active.MAP_INFO.characters || 'soldier'; }
 export function terrainConfig() { return active.TERRAIN; }
 export function colliderCount() { return active.COLLIDER_COUNT; }
 
@@ -77,7 +90,8 @@ export function mapDescriptor() {
     name: info.name,
     description: info.description,
     seed: active.TERRAIN.seed,
-    environment: info.environment
+    environment: info.environment,
+    movement: info.movement || DEFAULT_MOVEMENT
   };
 }
 

@@ -11,7 +11,7 @@
 
 import * as THREE from '../core/three.js';
 import { RIG } from '../characters/Soldier.js';
-import { collideCapsule, heightAt } from '/shared/maps/active.js';
+import { collideCapsule, heightAt, mapInfo } from '/shared/maps/active.js';
 
 const GRAVITY = -22;
 const DAMPING = 0.986;
@@ -206,7 +206,12 @@ export class Ragdoll {
   }
 
   _integrate(dt) {
-    const g = GRAVITY * dt * dt;
+    // Maps can turn the pull off. In orbit a body keeps whatever motion the round
+    // that killed it gave it, so the extra drag below is the only thing that ever
+    // brings it to rest -- otherwise it drifts until it is culled.
+    const scale = mapInfo()?.environment?.gravityScale ?? 1;
+    const g = GRAVITY * scale * dt * dt;
+    const drag = scale === 0 ? Math.exp(-0.55 * dt) : 1;
     for (const part of Object.values(this.p)) {
       const px = part.pos.x, py = part.pos.y, pz = part.pos.z;
       let vx = (px - part.prev.x) * DAMPING;
@@ -219,6 +224,7 @@ export class Ragdoll {
         vz *= 0.72;
       }
 
+      if (drag !== 1) { vx *= drag; vy *= drag; vz *= drag; }
       part.pos.set(px + vx, py + vy + g, pz + vz);
       part.prev.set(px, py, pz);
     }

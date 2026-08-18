@@ -5,13 +5,15 @@
 
 import * as snowyForest from './snowy_forest/index.js';
 import * as grassyPlains from './grassy_plains/index.js';
+import * as iss from './iss/index.js';
 
 export const MAPS = {
   snowy_forest: snowyForest,
-  grassy_plains: grassyPlains
+  grassy_plains: grassyPlains,
+  iss
 };
 
-/** Short names players can type: /map snow, /map grass */
+/** Short names players can type: /map snow, /map grass, /map iss */
 export const MAP_ALIASES = {
   snow: 'snowy_forest',
   snowy: 'snowy_forest',
@@ -23,7 +25,13 @@ export const MAP_ALIASES = {
   grassy_plains: 'grassy_plains',
   plains: 'grassy_plains',
   field: 'grassy_plains',
-  hollowmere: 'grassy_plains'
+  hollowmere: 'grassy_plains',
+  iss: 'iss',
+  space: 'iss',
+  station: 'iss',
+  orbit: 'iss',
+  orbital: 'iss',
+  zerog: 'iss'
 };
 
 export const DEFAULT_MAP = 'snowy_forest';

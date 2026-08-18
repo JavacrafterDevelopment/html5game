@@ -78,7 +78,14 @@ const SURFACE = {
   [KIND.HAY]: { color: [0.78, 0.66, 0.34], chips: 15, speed: 3.8, chip: [0.02, 0.06], puffs: 3, puff: [0.08, 0.16], gravity: -13, life: 0.6, spread: 0.38 },
   [KIND.MUD]: { color: [0.46, 0.36, 0.24], chips: 12, speed: 4.2, chip: [0.02, 0.05], puffs: 3, puff: [0.06, 0.13], gravity: -19, life: 0.5, spread: 0.32 },
   [KIND.FENCE]: { color: [0.45, 0.35, 0.22], chips: 10, speed: 4.4, chip: [0.015, 0.04], puffs: 2, puff: [0.05, 0.10], gravity: -19, life: 0.45, spread: 0.3 },
-  [KIND.PROP]: { color: [0.5, 0.5, 0.52], chips: 10, speed: 4.2, chip: [0.015, 0.04], puffs: 2, puff: [0.05, 0.11], gravity: -19, life: 0.45, spread: 0.32 }
+  [KIND.PROP]: { color: [0.5, 0.5, 0.52], chips: 10, speed: 4.2, chip: [0.015, 0.04], puffs: 2, puff: [0.05, 0.11], gravity: -19, life: 0.45, spread: 0.32 },
+  // In vacuum nothing falls and nothing puffs: a round into the hull throws a
+  // spray of bright metal that travels dead straight until it is out of sight.
+  [KIND.HULL]: { color: [0.78, 0.80, 0.84], chips: 16, speed: 6.5, chip: [0.012, 0.035], puffs: 0, puff: [0.04, 0.08], gravity: 0, life: 1.5, spread: 0.30 },
+  [KIND.TRUSS]: { color: [0.70, 0.72, 0.76], chips: 15, speed: 6.8, chip: [0.012, 0.032], puffs: 0, puff: [0.04, 0.08], gravity: 0, life: 1.4, spread: 0.34 },
+  [KIND.SOLAR]: { color: [0.55, 0.40, 0.20], chips: 13, speed: 5.2, chip: [0.015, 0.045], puffs: 0, puff: [0.04, 0.08], gravity: 0, life: 1.8, spread: 0.42 },
+  [KIND.RADIATOR]: { color: [0.88, 0.90, 0.92], chips: 14, speed: 5.8, chip: [0.012, 0.038], puffs: 0, puff: [0.04, 0.08], gravity: 0, life: 1.6, spread: 0.36 },
+  [KIND.GLASS]: { color: [0.86, 0.93, 0.98], chips: 20, speed: 7.4, chip: [0.010, 0.028], puffs: 0, puff: [0.03, 0.06], gravity: 0, life: 1.9, spread: 0.44 }
 };
 
 class DebrisSystem {

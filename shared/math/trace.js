@@ -111,3 +111,78 @@ export function normalize3(v) {
   v[0] /= l; v[1] /= l; v[2] /= l;
   return v;
 }
+
+/**
+ * Ray vs an axis-aligned TUBE: a finite cylinder with a bore down the middle.
+ *
+ * This is the shape of a space station module, and having it as a primitive is the
+ * difference between a hull that is exactly where it is drawn and one that is
+ * approximated by boxes. `rIn = 0` degenerates to a solid cylinder, which is how
+ * end caps and bulkhead discs are built.
+ *
+ * `axis` is 0/1/2 for X/Y/Z. (u, v) locate the axis line in the remaining two
+ * coordinates, in ascending index order: (y,z) for X, (x,z) for Y, (x,y) for Z.
+ *
+ * The bore is genuinely open -- a shot fired down an open hatch goes through.
+ *
+ * @returns distance along the ray, or -1 for no hit.
+ */
+export function rayTube(ox, oy, oz, dx, dy, dz, axis, u, v, from, to, rIn, rOut, maxDist) {
+  const o = axis === 0 ? ox : axis === 1 ? oy : oz;
+  const d = axis === 0 ? dx : axis === 1 ? dy : dz;
+  const op = axis === 0 ? oy : ox;
+  const dp = axis === 0 ? dy : dx;
+  const oq = axis === 2 ? oy : oz;
+  const dq = axis === 2 ? dy : dz;
+
+  // --- axial slab ---
+  let sMin = 0, sMax = maxDist;
+  if (Math.abs(d) < 1e-8) {
+    if (o < from || o > to) return -1;
+  } else {
+    const inv = 1 / d;
+    let t1 = (from - o) * inv, t2 = (to - o) * inv;
+    if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
+    if (t1 > sMin) sMin = t1;
+    if (t2 < sMax) sMax = t2;
+    if (sMin > sMax) return -1;
+  }
+
+  const mp = op - u, mq = oq - v;
+  const A = dp * dp + dq * dq;
+
+  // Ray parallel to the axis: it is either down the bore, through the wall the
+  // long way, or clean past. Radial distance never changes, so one test settles it.
+  if (A < 1e-12) {
+    const rr = Math.hypot(mp, mq);
+    if (rr < rIn || rr > rOut) return -1;
+    return sMin > 0 ? sMin : (sMax > 0 ? sMax : -1);
+  }
+
+  const B = 2 * (mp * dp + mq * dq);
+  const solve = (r) => {
+    const C = mp * mp + mq * mq - r * r;
+    const disc = B * B - 4 * A * C;
+    if (disc < 0) return null;
+    const s = Math.sqrt(disc);
+    const inv2a = 1 / (2 * A);
+    return [(-B - s) * inv2a, (-B + s) * inv2a];
+  };
+
+  const outer = solve(rOut);
+  if (!outer) return -1;
+  const lo = Math.max(outer[0], sMin);
+  const hi = Math.min(outer[1], sMax);
+  if (lo > hi) return -1;
+
+  // Subtract the bore. What is left is the wall, and its first face is the hit.
+  let t = lo;
+  if (rIn > 0) {
+    const inner = solve(rIn);
+    if (inner && inner[0] <= lo && inner[1] >= hi) return -1;   // all bore, no wall
+    if (inner && inner[0] <= lo && inner[1] > lo) t = inner[1]; // started in the bore
+  }
+  if (t < 0) t = hi > 0 ? 0 : -1;                               // started inside the wall
+  if (t < 0 || t > maxDist) return -1;
+  return t;
+}

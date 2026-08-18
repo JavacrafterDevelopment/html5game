@@ -5,10 +5,12 @@
 
 import { SnowyForestMap } from './snowy_forest/SnowyForestMap.js';
 import { GrassyPlainsMap } from './grassy_plains/GrassyPlainsMap.js';
+import { ISSMap } from './iss/ISSMap.js';
 
 const MAPS = {
   snowy_forest: SnowyForestMap,
-  grassy_plains: GrassyPlainsMap
+  grassy_plains: GrassyPlainsMap,
+  iss: ISSMap
 };
 
 export function createMap(id, scene, options) {

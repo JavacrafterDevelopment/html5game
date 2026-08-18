@@ -125,6 +125,28 @@ export class Input {
     return w;
   }
 
+  /**
+   * Side thrusters, on maps that have them. E banks right, Q banks left, and the
+   * bank holds where you leave it -- hold one long enough and you are upside down.
+   */
+  rollAxis() {
+    let r = 0;
+    if (this.isDown('KeyE')) r += 1;
+    if (this.isDown('KeyQ')) r -= 1;
+    return r;
+  }
+
+  /**
+   * Translation along your own up axis. On the ground these keys are jump and
+   * crouch; in free fall there is nothing to jump off, so they become thrusters.
+   */
+  liftAxis() {
+    let y = 0;
+    if (this.isDown('Space')) y += 1;
+    if (this.isDown('ControlLeft') || this.isDown('KeyC')) y -= 1;
+    return y;
+  }
+
   /** Movement intent in local space: x = strafe, z = forward. */
   moveVector() {
     let x = 0, z = 0;

@@ -139,12 +139,17 @@ html5game/
 │       │   ├── props.js         deterministic tree/rock/log scatter + spawn candidates
 │       │   ├── cabin.js         cabin geometry as collision boxes
 │       │   └── collision.js     collider list + validated spawn points
-│       └── grassy_plains/
-│           ├── index.js         map bundle
-│           ├── terrain.js       gentle heightfield + levelled hut and cave pads
-│           ├── props.js         trees, hedgerow, haystacks, sheep herds
-│           ├── huts.js          two enterable huts as collision boxes
-│           ├── cave.js          rock chamber with a single mouth
+│       ├── grassy_plains/
+│       │   ├── index.js         map bundle
+│       │   ├── terrain.js       gentle heightfield + levelled hut and cave pads
+│       │   ├── props.js         trees, hedgerow, haystacks, sheep herds
+│       │   ├── huts.js          two enterable huts as collision boxes
+│       │   ├── cave.js          rock chamber with a single mouth
+│       │   └── collision.js     collider list + validated spawn points
+│       └── iss/
+│           ├── index.js         map bundle + zero-g movement profile
+│           ├── terrain.js       the ABSENCE of terrain, stated explicitly
+│           ├── station.js       every part of the station, as data. one list.
 │           └── collision.js     collider list + validated spawn points
 │
 ├── client/                    ← everything the browser loads
@@ -184,15 +189,19 @@ html5game/
 │       │   │   ├── Foliage.js          instanced forest
 │       │   │   ├── CabinMesh.js        log cabin built from the collision boxes
 │       │   │   └── Sky.js              sky dome + light rig
-│       │   └── grassy_plains/
-│       │       ├── GrassyPlainsMap.js  scene assembly
-│       │       ├── TerrainMesh.js      green terrain painting
-│       │       ├── GrassField.js       instanced wind-swayed grass
-│       │       ├── HutMesh.js          huts built from the collision boxes
-│       │       ├── CaveMesh.js         cave rock, clamped inside its collider
-│       │       ├── Props.js            trees, hedge, haystacks, carts
-│       │       ├── Sheep.js            wandering flocks
-│       │       └── Sky.js              summer sky + drifting clouds
+│       │   ├── grassy_plains/
+│       │   │   ├── GrassyPlainsMap.js  scene assembly
+│       │   │   ├── TerrainMesh.js      green terrain painting
+│       │   │   ├── GrassField.js       instanced wind-swayed grass
+│       │   │   ├── HutMesh.js          huts built from the collision boxes
+│       │   │   ├── CaveMesh.js         cave rock, clamped inside its collider
+│       │   │   ├── Props.js            trees, hedge, haystacks, carts
+│       │   │   ├── Sheep.js            wandering flocks
+│       │   │   └── Sky.js              summer sky + drifting clouds
+│       │   └── iss/
+│       │       ├── ISSMap.js           scene assembly
+│       │       ├── StationMesh.js      station drawn from the shared parts list
+│       │       └── Sky.js              starfield, sun, Earth, light rig, cabin lamps
 │       ├── effects/
 │       │   ├── Snowfall.js      GPU snow, camera-tiled
 │       │   ├── WindMotes.js     wind streak lines + motes, camera-tiled
@@ -274,12 +283,13 @@ The head also wins any tie, since it sits inside the body's upper cap.
 
 ## 5. The maps
 
-Two maps ship, and the whole server can move between them at runtime. Anyone can
+Three maps ship, and the whole server can move between them at runtime. Anyone can
 type it in chat:
 
 ```
 /map snow      →  Whiteout Ridge
 /map grass     →  Hollowmere
+/map iss       →  Orbital   (also /map space, /map station, /map orbit)
 /maps          →  list them
 /help          →  list commands
 ```
@@ -293,7 +303,7 @@ the welcome message names the map and the client rebuilds before you spawn.
 
 ### About invisible walls
 
-Both maps are checked by [`tools/test-maps.mjs`](tools/test-maps.mjs), which exists
+The ground maps are checked by [`tools/test-maps.mjs`](tools/test-maps.mjs), which exists
 because an oversized collider is indistinguishable, in play, from an invisible wall
 and is miserable to find by hand. It samples ~9,000 points of open ground per map,
 pushes a player capsule through the real solver, and every time the solver moves the
@@ -306,6 +316,9 @@ That test found two genuine bugs: the snowy map's mountains were too gentle to
 trigger sliding, so a sprinting player could walk up them into the hard clamp; and
 spawn points were only checked against the heightfield, so a few sat inside rocks.
 Both are fixed, and spawns are now filtered through the collision solver itself.
+
+A map with no ground fails every assumption in that suite, so the ISS gets its own
+one — see [§5.3](#orbital--the-iss) and [§13](#13-testing).
 
 ### Whiteout Ridge — snowy forest
 
@@ -372,6 +385,160 @@ collider is the inverse of an invisible wall, and just as bad.
 - **The boundary is a hedgerow** — not an invisible wall, and not a slope you slide
   off. It is a ring of overlapping cylinders drawn as a thick hedge; the gaps
   between them are narrower than a player, so it is solid because of its geometry.
+
+### Orbital — the ISS
+
+The station, 400 km up. No floor, no ceiling, and no up unless you decide there is
+one. Roughly 110 m of truss across, 55 m of pressurised stack fore to aft.
+
+**Flying.** `MAP_INFO.movement.mode` is `'zerog'`, and `LocalPlayer` reads that off
+the active map every frame — so nothing in the controller knows this map exists, it
+just stops applying gravity when the map says there is none. W and S still mean
+forward and back; they follow where you are looking rather than the ground. A and D
+strafe, space and crouch translate along your own up axis, shift is a boost. **Q and
+E are the side thrusters**, and the bank they put in *stays where you leave it* —
+there is no horizon to level against and nothing to level you, so holding E for two
+seconds leaves you flying upside down and staying there.
+
+Velocity approaches the commanded speed exponentially rather than being set outright
+(thrusters have a spool-up) and coasts back down on a much slower constant, so
+letting go leaves you drifting instead of stopping dead.
+
+Two details that are easy to get wrong:
+
+- **Banked over, the mouse has to be rotated too.** Yaw is a world-Y rotation, so at
+  180° of bank a right-hand mouse move turns you left on screen. `look()` rotates the
+  incoming delta by the bank angle, which keeps "mouse right" meaning right as you
+  see it. Without it, flying inverted does not feel inverted, it feels broken.
+- **The movement hull is a tuck, not a stance.** A player standing to attention is
+  1.8 m of rigid capsule that cannot duck, and threading that through a 4 m hatch
+  means either building corridors nobody would mistake for the ISS or wedging people
+  in the doorways. In zero-g the movement capsule is `PLAYER.FLIGHT_HEIGHT` (0.92 m)
+  by `FLIGHT_RADIUS` (0.40 m). Shots are still traced against the full-size capsule
+  and head sphere, so nothing about aiming or hit registration changes.
+
+**Everybody is an astronaut.** `MAP_INFO.characters` is `'astronaut'`, which swaps
+the soldier rig's materials and the hardware bolted to it — white EMU, gold sun
+visor, PLSS backpack, joint bearings, red commander stripes — and changes nothing
+else. Same bones, same proportions, same limb origins, so the animator and the
+ragdoll solver never learn there are two kinds of person in this game. Remote players
+hang off their midriff rather than their feet in free fall and carry pitch and bank
+with them, so somebody flying head-first down a module looks like it.
+
+**Bodies drift.** `environment.gravityScale` is 0, which the ragdoll solver, the
+impact debris and the blood all read. A body you shoot keeps whatever motion the
+round gave it and tumbles away; a round into the hull throws a spray of bright metal
+that travels dead straight until it is out of sight. Nothing falls, because there is
+nothing to fall to.
+
+#### The station is one list
+
+Every single thing you can see on this map is one entry in
+[`shared/maps/iss/station.js`](shared/maps/iss/station.js), and every entry is a
+collider. There is no second list. That is a direct response to how the plains map
+grew fences that were drawn from one table and collided from another and drifted
+apart into scenery hanging in mid-air. Here the renderer walks the same array, so a
+part cannot be drawn somewhere it does not exist.
+
+Decoration is allowed on one condition: it must sit **inside** the collision volume
+it belongs to. Truss bracing, cupola window mullions and interior panelling are all
+drawn inside solids a player can never reach, so they can be angled and crossed as
+much as they like. The only things that break the surface are handrails, hull ribs
+and the avionics boxes, none by more than 15 cm — the price of the station looking
+like the ISS instead of like plumbing. `tools/browser-check.js` fires several hundred
+rays at the station from every side and asserts the drawn surface and the collision
+surface agree; it reports the worst overhang, currently 0.15 m.
+
+#### A module is a tube, because a module is a tube
+
+The shared collider grew a fourth primitive for this map: an axis-aligned **tube**, a
+finite cylinder with a bore down the middle (`rIn = 0` degenerates to a solid
+cylinder — bulkhead discs, masts, struts). It is worth the code because a station
+module genuinely is that shape, so the hull is exactly where it is drawn rather than
+approximated by boxes. Boxes were the alternative and they are much worse than they
+sound: an AABB round a 5 m cylinder overshoots by 87 cm at the corners, and that gap
+*is* an invisible wall.
+
+Capsule-vs-tube has one non-obvious rule. Which surface applies depends on which side
+of the wall you are on: the **outer** skin has to clear the *nearest* point of the
+capsule, while the bore has to contain its *farthest*. Getting that backwards makes a
+player standing in a horizontal module rise gently through the ceiling, because the
+middle of a capsule is always the closest bit to the axis.
+
+#### Nodes, and why they are six rings
+
+A hollow shape has to come from the shape of each piece, because a solid is a *union*
+of primitives and a union cannot have a hole punched in it. So a node — Unity,
+Harmony, Tranquility — is six berthing collars meeting at a hub with nothing in the
+middle, plus eight corner blocks.
+
+The corner blocks are not decoration. Six rings alone technically close the hub, but
+only just: along the (1,1,1) diagonal the wall they form is a couple of hundred
+millimetres thick, and a body wedged in that corner is being pushed by three rings at
+once, each of which resolves it somewhere the other two disagree with — the result is
+a player fired out through the corner at speed. That is not a hypothetical: the first
+version leaked on 51 of 13,200 test flights, all of them in the same corner
+directions. The blocks make the corner a metre and a half of plain box, which resolves
+unambiguously, and they cannot foul a hatch because a block needs 1.60 m of clearance
+on all three axes at once, so the nearest it comes to a port axis is 2.26 m against a
+2.05 m bore.
+
+#### The doors are real
+
+Three ways in, and the whole pressurised stack is a clear sight line end to end:
+
+- **forward**, through PMA-2 on Harmony's nose
+- **aft**, out the back of Zvezda
+- **the Quest airlock**, off Unity's starboard port, with its outer hatch swung back
+  and parked well clear of its own doorway
+
+Fly in the front and you can fly 55 m and out the back. Shoot down it and the round
+goes the same way. `tools/test-maps.mjs` proves both halves of this: it builds a
+second copy of the station with the three doorways *plugged* and demands that
+absolutely nothing escapes it in 14,400 flights from 12 compartments, then flies
+through each doorway on the real map to prove it is open. Plugging the doors matters
+— without it a genuine hull leak can hide behind "well, it probably went out of a
+hatch".
+
+#### The sky
+
+Stars, one white sun and Earth are all drawn in the dome shader rather than as
+objects, because anything real would have to sit somewhere and a 6,000 km planet
+placed 90 m away is a thing you can fly into. Painted on the dome they stay where
+they belong — infinitely far — however far across the map you thrust.
+
+The starfield is four layers of cell-hashed points with spectral tinting, thickening
+along a tilted Milky Way with its own dust lanes. Earth gets a real terminator
+computed from the surface normal, procedural continents and coastal shelf water, a
+drifting cloud deck, city lights on the night side and a blue atmospheric limb. Three
+bugs were worth the debugging:
+
+- The surface normal was inverted, which lit the far side of the planet and left the
+  face you were looking at in darkness.
+- The ice caps used world Y for latitude — and since Earth hangs directly below the
+  station, that meant staring straight down at a polar cap the size of the visible
+  disc. The planet has its own tilted axis now.
+- The normal barely turns per pixel at the middle of the disc and swings hard at the
+  limb, so features sized sensibly at the edge get magnified enormously in the
+  centre. All the surface frequencies are higher than they look like they need to be
+  for exactly that reason.
+
+Lighting is one hard white sun with shadows, plus a broad blue bounce from below,
+which is genuinely where the fill light comes from up here — vacuum shadows go to
+absolute black, which is truthful and unplayable. Metalness is deliberately held
+around 0.4 on every metal in the scene: a metalness of 1 has no diffuse response at
+all, and with no environment map to reflect, every ring, strut and gimbal renders as
+a black silhouette.
+
+Inside is lit by real lamps, one per compartment, taken from the layout's own list of
+compartment centres so a module cannot be added later and left dark. The panels also
+carry a dim self-illumination, because a strip light is emissive but does not *light*
+anything, and a module lit only that way is a black tube with four glowing lines in
+it.
+
+**The Cupola** is a dead end you can fly into and look out of. Its panes are actually
+transparent — opaque glass turns the best window on the station into a dark hole —
+and it is the one place on any map where you can watch Earth go past.
 
 ## 6. Weapons
 
@@ -544,6 +711,19 @@ points that anchor exactly along the player's aim. Two-armed IK would look sligh
 nicer and line up considerably worse — this way a remote player's muzzle always
 agrees with the direction the server traced.
 
+**The map decides what people look like.** `MAP_INFO.characters` selects a style, and
+`createSoldier({ style })` swaps the materials and the hardware bolted to the rig —
+nothing else. Same bones, same proportions, same limb origins, which is precisely
+what lets the animator and the ragdoll solver stay unaware there is more than one
+kind of person in the game. In orbit that gives an EMU: white ortho-fabric scuffed
+from handrails, a hard upper torso, a gold sun visor, a PLSS backpack and SAFER,
+joint bearings at every hinge, and red commander stripes so two astronauts are not
+the same white blob.
+
+The visor is held at metalness 0.55 rather than 1.0 for the same reason as the
+station's metals — with no environment map to reflect, a physically metallic visor
+is a black hole where the face should be.
+
 ### Ragdolls
 
 On death the body becomes a verlet particle system: 15 particles, 28 distance
@@ -593,6 +773,7 @@ There are, deliberately, no hit or kill sounds anywhere in `AudioEngine.js`.
 | `Shift` | Sprint |
 | `Ctrl` / `C` | Crouch |
 | `Space` | Jump |
+| `Q` `E` | **Roll** — side thrusters, ISS only |
 | Left mouse | Fire |
 | **Right mouse** | **Aim down sights** |
 | `R` | Reload |
@@ -600,6 +781,11 @@ There are, deliberately, no hit or kill sounds anywhere in `AudioEngine.js`.
 | `Tab` (hold) | Scoreboard |
 | `T` or `Enter` | Chat (also where `/map` goes) |
 | `Esc` | Release mouse |
+
+In orbit the same keys mean the same things pointed somewhere new: W and S still go
+forward and back, they just follow where you are looking; space and crouch become
+up and down thrusters; shift is a boost rather than a sprint. `Q` and `E` are new,
+and the bank they put in holds where you leave it — see [§5.3](#orbital--the-iss).
 
 While the chat box is open the keyboard belongs to it: typing "wasd" in a message
 does not queue movement, and the pause overlay stays down — releasing the mouse to
@@ -639,7 +825,7 @@ Or individually:
 ```bash
 runtime\node\node.exe tools\check.mjs            # syntax-check all source
 runtime\node\node.exe tools\test-handshake.mjs   # WebSocket RFC 6455 conformance
-runtime\node\node.exe tools\test-maps.mjs        # invisible walls, spawns, boundaries
+runtime\node\node.exe tools\test-maps.mjs        # invisible walls, spawns, boundaries, hull seals
 runtime\node\node.exe tools\test-combat.mjs      # combat, hardcore rules, /map
 ```
 
@@ -658,7 +844,22 @@ Two of these exist because of bugs that were genuinely nasty to find:
   tracers, muzzle flashes, the entire scope overlay) silently vanishes. The check
   renders a full frame and asserts no material declares fog without the uniforms.
 
-`browser-check.js` also guards two things that are easy to break by accident and
+`test-maps.mjs` branches on the map's movement mode, because a map with no ground
+fails every assumption the ground suite makes. The zero-g suite instead proves:
+
+- **Nothing floats.** Every part of the station has to touch another one. This is
+  the check the plains map never had, and the reason it grew fences standing in
+  mid-air.
+- **The hull is sealed.** It rebuilds the station with the three doorways plugged
+  and flies a player hard in 1,200 directions out of each of 12 compartments —
+  14,400 flights, and not one may leave the pressurised volume through a wall. This
+  found a real leak in the node corners: 51 escapes, all in the same diagonal
+  directions, fixed by adding the corner blocks.
+- **The doorways are open.** Fly the length of the stack both ways, and out the
+  airlock. A station you cannot get into is scenery.
+- **Empty space is empty.** 4,000 points beyond the structure, zero contacts.
+
+`browser-check.js` also guards four things that are easy to break by accident and
 hard to notice from a single screenshot:
 
 - **Weapon pose drift.** It runs a full reload to completion and asserts the muzzle
@@ -668,6 +869,15 @@ hard to notice from a single screenshot:
 - **Muzzle flash size.** It asserts the flash quad is under 13 cm and carries a
   texture. The flash is drawn a few centimetres from the eye; anything approaching
   the size of the weapon stops being a flash and starts being a wall.
+- **Drawn geometry vs. collision geometry.** On the ISS it fires several hundred
+  rays at the station from every side and asserts the drawn surface is never more
+  than 30 cm proud of the surface that stops a bullet. This found truss bracing
+  rotated about the wrong axis, standing nearly two metres clear of its own segment
+  with no collider behind it.
+- **The bank persists.** It holds `E` for 1.8 s, checks the player has gone past
+  inverted, then releases and checks the bank is still there two seconds later. A
+  roll that springs back to level is a lean, and the point of that map is being able
+  to fly upside down.
 
 ---
 

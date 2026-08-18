@@ -18,5 +18,11 @@ export const KIND = {
   THATCH: 'thatch',
   MUD: 'mud',
   HAY: 'hay',
-  FENCE: 'fence'
+  FENCE: 'fence',
+  // orbit
+  HULL: 'hull',           // pressurised module skin
+  TRUSS: 'truss',         // the aluminium spine and everything bolted to it
+  SOLAR: 'solar',         // array blankets
+  RADIATOR: 'radiator',
+  GLASS: 'glass'          // cupola panes
 };

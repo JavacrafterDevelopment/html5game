@@ -429,6 +429,8 @@ export class Game {
 
       // Physics first: the shared collision layer must agree with what we draw.
       setActiveMap(msg.map.id);
+      // Crews are per-map. Nobody walks onto the ISS in winter camo.
+      for (const rp of this.remotes.values()) rp.rebuildBody();
       this.map.dispose();
       this.map = createMap(msg.map.id, this.scene, { quality: this.settings.resolvedQuality });
       await this.map.build((f, label) => {
@@ -711,6 +713,9 @@ export class Game {
       jump: canPlay && this.input.isDown('Space'),
       crouch: canPlay && (this.input.isDown('ControlLeft') || this.input.isDown('KeyC')),
       sprint: canPlay && this.input.isDown('ShiftLeft'),
+      // Ignored on the ground; on the ISS these are the attitude and lift thrusters.
+      roll: canPlay && this.input.locked ? this.input.rollAxis() : 0,
+      lift: canPlay && this.input.locked ? this.input.liftAxis() : 0,
       ads: wantAds,
       speedMult: this.weapons.weapon.feel.moveMult,
       recoilRecover: this.weapons.weapon.feel.recoilRecover,
@@ -839,6 +844,8 @@ export class Game {
       p: [round2(p.pos[0]), round2(p.pos[1]), round2(p.pos[2])],
       y: round3(p.yaw + p.recoilYaw),
       t: round3(p.pitch + p.recoilPitch),
+      // Bank. Only ever non-zero in free flight, and only a few bytes when it is.
+      r: p.roll ? round3(p.roll) : 0,
       st: p.stateBits(STATE_BITS, {
         ads: this.weapons.ads,
         firing: this.input.isMouseDown(LEFT_MOUSE),

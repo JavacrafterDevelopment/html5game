@@ -30,6 +30,7 @@ export class Player {
     this.pos = [0, 0, 0];
     this.yaw = 0;
     this.pitch = 0;
+    this.roll = 0;              // bank angle; only ever non-zero in free flight
     this.stateBits = 0;
 
     // combat
@@ -83,6 +84,7 @@ export class Player {
     this.pos = [point.x, point.y, point.z];
     this.yaw = point.yaw;
     this.pitch = 0;
+    this.roll = 0;
     this.hp = PLAYER.MAX_HP;
     this.alive = true;
     this.stateBits = 0;
@@ -190,6 +192,11 @@ export class Player {
     if (typeof msg.t === 'number' && Number.isFinite(msg.t)) {
       this.pitch = Math.max(-1.55, Math.min(1.55, msg.t));
     }
+    // Bank angle. Purely cosmetic -- it decides which way up other people see you
+    // floating, and nothing else -- so it is passed through as reported.
+    if (typeof msg.r === 'number' && Number.isFinite(msg.r)) {
+      this.roll = Math.max(-3.1416, Math.min(3.1416, msg.r));
+    }
     if (typeof msg.st === 'number') this.stateBits = msg.st | 0;
     if (typeof msg.wp === 'string' && (msg.wp === this.primary || msg.wp === this.secondary)) {
       this.weaponId = msg.wp;
@@ -273,6 +280,7 @@ export class Player {
       p: [round2(this.pos[0]), round2(this.pos[1]), round2(this.pos[2])],
       y: round3(this.yaw),
       t: round3(this.pitch),
+      r: this.roll ? round3(this.roll) : 0,
       s: bits,
       w: this.weaponId,
       a: this.alive ? 1 : 0

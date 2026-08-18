@@ -11,6 +11,7 @@
 
 import * as THREE from '../core/three.js';
 import { getCamoMaterials } from './CamoTexture.js';
+import { getSuitMaterials } from './SpaceSuit.js';
 
 /** Skeleton measurements, metres. Sums to the 1.80 m player height in shared/config.js. */
 export const RIG = {
@@ -55,12 +56,25 @@ function joint(parent, x, y, z) {
   return o;
 }
 
+/** A bearing ring round a limb. Suits are full of them and soldiers have none. */
+function makeRing(parent, radius, thickness, material, y = 0) {
+  const m = new THREE.Mesh(new THREE.TorusGeometry(radius, thickness, 6, 14), material);
+  m.rotation.x = Math.PI / 2;
+  m.position.y = y;
+  parent.add(m);
+  return m;
+}
+
 /**
- * @param {{ shadows?: boolean }} opts
+ * @param {{ shadows?: boolean, style?: string }} opts
+ *   style 'astronaut' swaps the materials and the hardware bolted to the rig, and
+ *   nothing else -- same bones, same proportions, same limb origins. That is what
+ *   lets the animator and the ragdoll solver stay unaware there are two of these.
  * @returns {{ group: THREE.Group, bones: object, parts: object, weaponMount: THREE.Object3D }}
  */
 export function createSoldier(opts = {}) {
-  const mats = getCamoMaterials();
+  const suited = opts.style === 'astronaut';
+  const mats = suited ? getSuitMaterials() : getCamoMaterials();
   const shadows = opts.shadows !== false;
 
   const group = new THREE.Group();
@@ -91,21 +105,42 @@ export function createSoldier(opts = {}) {
   const upperChest = makeBox(0.435, 0.20, 0.255, mats.camo, 0, 0.0, 0);
   chest.add(upperChest);
 
-  // plate carrier over the top
-  const vest = makeBox(0.415, 0.42, 0.30, mats.gearLight, 0, -0.10, 0.005);
-  chest.add(vest);
-  const vestTrim = makeBox(0.44, 0.05, 0.31, mats.webbing, 0, 0.06, 0.005);
-  chest.add(vestTrim);
-  // magazine pouches across the front
-  for (let i = -1; i <= 1; i++) {
-    chest.add(makeBox(0.095, 0.15, 0.075, mats.webbing, i * 0.115, -0.16, 0.155));
+  if (suited) {
+    // Hard upper torso: the fibreglass shell everything else hangs off.
+    const hut = makeBox(0.455, 0.44, 0.335, mats.gearLight, 0, -0.09, 0.005);
+    chest.add(hut);
+    chest.add(makeBox(0.475, 0.055, 0.35, mats.metal, 0, 0.075, 0.005));      // neck ring line
+    chest.add(makeBox(0.475, 0.05, 0.35, mats.metal, 0, -0.30, 0.005));       // waist bearing
+    // Display and control module, on the chest where it can be read upside down.
+    chest.add(makeBox(0.20, 0.155, 0.075, mats.gear, 0, -0.13, 0.20));
+    chest.add(makeBox(0.135, 0.075, 0.02, mats.trim, 0, -0.10, 0.245));
+    chest.add(makeBox(0.155, 0.028, 0.02, mats.stripe, 0, -0.185, 0.245));
+    // The PLSS: the backpack that is the actual spacecraft.
+    chest.add(makeBox(0.415, 0.50, 0.235, mats.gearLight, 0, -0.10, -0.235));
+    chest.add(makeBox(0.435, 0.045, 0.255, mats.metal, 0, 0.10, -0.235));
+    chest.add(makeBox(0.30, 0.16, 0.14, mats.gear, 0, -0.40, -0.30));         // SAFER pack
+    chest.add(makeBox(0.075, 0.075, 0.075, mats.webbing, -0.175, -0.40, -0.30));
+    chest.add(makeBox(0.075, 0.075, 0.075, mats.webbing, 0.175, -0.40, -0.30));
+    // Tether reels, clipped to the front of the shell.
+    chest.add(makeBox(0.085, 0.085, 0.055, mats.metal, -0.20, -0.235, 0.14));
+    chest.add(makeBox(0.085, 0.085, 0.055, mats.metal, 0.20, -0.235, 0.14));
+  } else {
+    // plate carrier over the top
+    const vest = makeBox(0.415, 0.42, 0.30, mats.gearLight, 0, -0.10, 0.005);
+    chest.add(vest);
+    const vestTrim = makeBox(0.44, 0.05, 0.31, mats.webbing, 0, 0.06, 0.005);
+    chest.add(vestTrim);
+    // magazine pouches across the front
+    for (let i = -1; i <= 1; i++) {
+      chest.add(makeBox(0.095, 0.15, 0.075, mats.webbing, i * 0.115, -0.16, 0.155));
+    }
+    // shoulder straps
+    chest.add(makeBox(0.075, 0.10, 0.25, mats.webbing, -0.16, 0.08, 0));
+    chest.add(makeBox(0.075, 0.10, 0.25, mats.webbing, 0.16, 0.08, 0));
+    // small pack on the back
+    chest.add(makeBox(0.30, 0.34, 0.145, mats.camo, 0, -0.10, -0.185));
+    chest.add(makeBox(0.19, 0.10, 0.09, mats.webbing, 0, -0.24, -0.25));
   }
-  // shoulder straps
-  chest.add(makeBox(0.075, 0.10, 0.25, mats.webbing, -0.16, 0.08, 0));
-  chest.add(makeBox(0.075, 0.10, 0.25, mats.webbing, 0.16, 0.08, 0));
-  // small pack on the back
-  chest.add(makeBox(0.30, 0.34, 0.145, mats.camo, 0, -0.10, -0.185));
-  chest.add(makeBox(0.19, 0.10, 0.09, mats.webbing, 0, -0.24, -0.25));
 
   // ------------------------------------------------------------- head
   const neck = joint(chest, 0, RIG.neckLen, 0);
@@ -123,23 +158,51 @@ export function createSoldier(opts = {}) {
   head.add(skull);
   parts.head = skull;
 
-  // helmet: cut sphere + brim, in the same white camo as the uniform
-  const helmetGeo = new THREE.SphereGeometry(RIG.headRadius * 1.16, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.56);
-  helmetGeo.translate(0, 0.075, 0);
-  const helmet = new THREE.Mesh(helmetGeo, mats.helmet);
-  helmet.castShadow = shadows;
-  head.add(helmet);
-  const brim = new THREE.Mesh(new THREE.TorusGeometry(RIG.headRadius * 1.09, 0.016, 6, 18), mats.helmet);
-  brim.rotation.x = Math.PI / 2;
-  brim.position.y = 0.072;
-  head.add(brim);
-  // helmet camo band + NVG mount stub
-  head.add(makeBox(0.075, 0.045, 0.045, mats.webbing, 0, 0.135, 0.10));
+  if (suited) {
+    // The bubble, and the gold sun visor pulled down over the front of it. Both
+    // are opaque: a real EVA visor is a mirror from outside, so modelling it that
+    // way is free and avoids sorting a transparent sphere in front of a face.
+    const shellGeo = new THREE.SphereGeometry(RIG.headRadius * 1.72, 18, 14);
+    shellGeo.translate(0, 0.055, 0.005);
+    const shell = new THREE.Mesh(shellGeo, mats.helmet);
+    shell.castShadow = shadows;
+    head.add(shell);
 
-  // goggles
-  const goggles = makeBox(0.205, 0.055, 0.045, mats.goggle, 0, 0.055, 0.088);
-  head.add(goggles);
-  head.add(makeBox(0.215, 0.022, 0.03, mats.webbing, 0, 0.055, -0.06));
+    const visorGeo = new THREE.SphereGeometry(RIG.headRadius * 1.76, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.44);
+    const visor = new THREE.Mesh(visorGeo, mats.visor);
+    visor.rotation.x = Math.PI / 2;
+    visor.position.set(0, 0.055, 0.005);
+    head.add(visor);
+    // The white frame round the edge of the visor.
+    const frame = new THREE.Mesh(new THREE.TorusGeometry(RIG.headRadius * 1.51, 0.017, 6, 20), mats.helmet);
+    frame.position.set(0, 0.055, 0.075);
+    head.add(frame);
+    // Neck ring, where the helmet locks onto the torso shell.
+    head.add(makeBox(0.20, 0.045, 0.20, mats.metal, 0, -0.115, 0.005));
+    // EVA lamps and the little TV camera on the yoke over the top.
+    head.add(makeBox(0.30, 0.05, 0.075, mats.gear, 0, 0.235, 0.02));
+    head.add(makeBox(0.055, 0.055, 0.045, mats.lamp, -0.135, 0.235, 0.055));
+    head.add(makeBox(0.055, 0.055, 0.045, mats.lamp, 0.135, 0.235, 0.055));
+    head.add(makeBox(0.05, 0.05, 0.06, mats.trim, 0, 0.275, 0.03));
+  } else {
+    // helmet: cut sphere + brim, in the same white camo as the uniform
+    const helmetGeo = new THREE.SphereGeometry(RIG.headRadius * 1.16, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.56);
+    helmetGeo.translate(0, 0.075, 0);
+    const helmet = new THREE.Mesh(helmetGeo, mats.helmet);
+    helmet.castShadow = shadows;
+    head.add(helmet);
+    const brim = new THREE.Mesh(new THREE.TorusGeometry(RIG.headRadius * 1.09, 0.016, 6, 18), mats.helmet);
+    brim.rotation.x = Math.PI / 2;
+    brim.position.y = 0.072;
+    head.add(brim);
+    // helmet camo band + NVG mount stub
+    head.add(makeBox(0.075, 0.045, 0.045, mats.webbing, 0, 0.135, 0.10));
+
+    // goggles
+    const goggles = makeBox(0.205, 0.055, 0.045, mats.goggle, 0, 0.055, 0.088);
+    head.add(goggles);
+    head.add(makeBox(0.215, 0.022, 0.03, mats.webbing, 0, 0.055, -0.06));
+  }
 
   // ------------------------------------------------------------- arms
   function buildArm(side) {
@@ -167,11 +230,21 @@ export function createSoldier(opts = {}) {
     // elbow pad
     elbow.add(makeBox(0.085, 0.09, 0.085, mats.gear, 0, -0.03, 0.01));
 
+    if (suited) {
+      // Shoulder and elbow bearings, plus the red bands the commander wears. They
+      // are what stop a white suit from reading as a snowman.
+      makeRing(shoulder, 0.068, 0.014, mats.metal, -0.012);
+      makeRing(elbow, 0.052, 0.013, mats.metal, -0.008);
+      shoulder.add(makeBox(0.108, 0.05, 0.108, mats.stripe, 0, -0.185, 0));
+      elbow.add(makeBox(0.092, 0.042, 0.092, mats.stripe, 0, -0.17, 0));
+    }
+
     const wrist = joint(elbow, 0, -RIG.lowerArm, 0);
     bones['wrist' + side] = wrist;
     const hand = makeBox(0.062, RIG.handLen, 0.085, mats.glove, 0, -RIG.handLen / 2, 0.005);
     hand.castShadow = shadows;
     wrist.add(hand);
+    if (suited) makeRing(wrist, 0.046, 0.012, mats.metal, -0.008);
     parts['hand' + side] = hand;
     return wrist;
   }
@@ -205,12 +278,17 @@ export function createSoldier(opts = {}) {
 
     const knee = joint(hip, 0, -RIG.thigh, 0);
     bones['knee' + side] = knee;
-    knee.add(makeBox(0.10, 0.10, 0.10, mats.gear, 0, -0.02, 0.015));   // knee pad
+    knee.add(makeBox(0.10, 0.10, 0.10, suited ? mats.gearLight : mats.gear, 0, -0.02, 0.015));
 
     const shin = makeLimb(0.072, 0.05, RIG.shin, mats.camoLimb);
     shin.castShadow = shadows;
     knee.add(shin);
     parts['shin' + side] = shin;
+
+    if (suited) {
+      makeRing(hip, 0.098, 0.015, mats.metal, -0.03);
+      knee.add(makeBox(0.086, 0.042, 0.086, mats.stripe, 0, -0.18, 0));
+    }
 
     const ankle = joint(knee, 0, -RIG.shin, 0);
     bones['ankle' + side] = ankle;
