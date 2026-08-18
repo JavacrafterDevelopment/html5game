@@ -15,6 +15,16 @@ import { collideCapsule, heightAt, mapInfo } from '/shared/maps/active.js';
 
 const GRAVITY = -22;
 const DAMPING = 0.986;
+/**
+ * Air is what slows a tumbling body down, and there is none in orbit. Damping is
+ * held just under 1 -- enough to keep the verlet integrator from drifting, not
+ * enough to stop anybody -- with a slow separate bleed on top so a corpse settles
+ * into a gentle drift after half a minute instead of leaving the map forever.
+ */
+const ZEROG_DAMPING = 0.9995;
+const ZEROG_DRAG = 0.06;
+/** How hard an off-centre hit spins a body that has nothing to brace against. */
+const ZEROG_SPIN = 2.6;
 const ITERATIONS = 9;
 const PARTICLE_RADIUS = 0.11;
 const SLEEP_SPEED = 0.012;
@@ -73,6 +83,9 @@ const LINKS = [
 
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
+const _v5 = new THREE.Vector3();
 const _yAxis = new THREE.Vector3();
 const _xAxis = new THREE.Vector3();
 const _zAxis = new THREE.Vector3();
@@ -95,6 +108,9 @@ export class Ragdoll {
     this.sleepTimer = 0;
     this.asleep = false;
     this.dead = false;
+    // Read once, at death. A body that is falling when the map changes under it
+    // should keep falling rather than suddenly deciding it is in orbit.
+    this.zeroG = (mapInfo()?.environment?.gravityScale ?? 1) === 0;
 
     // Take ownership of the rig, PRESERVING where it currently is in the world.
     // The rig is normally a child of a player container holding the position, so
@@ -164,6 +180,44 @@ export class Ragdoll {
       part.prev.y -= (dir.y * power * weight * 0.4) * dt;
       part.prev.z -= dir.z * power * weight * dt;
     }
+
+    if (this.zeroG) this._spin(dir, hitY);
+  }
+
+  /**
+   * Set a body tumbling.
+   *
+   * On the ground a corpse lands and that is the end of it. In free fall there is
+   * nothing to stop it rotating, and a body that translates without spinning reads
+   * instantly as a prop being slid along a table rather than a person who has just
+   * been shot.
+   *
+   * Verlet has no angular velocity to set, so the rotation is seeded straight into
+   * the particle velocities -- v = omega x r about the body's middle -- and the
+   * distance constraints carry it from there, because a rigid rotation is exactly
+   * the motion those constraints are happy to preserve.
+   *
+   * The axis comes from where the round actually landed: torque is lever x force,
+   * so a square hit on the middle of the chest barely turns anybody and a hit to
+   * the head or the legs sends them end over end. A little randomness on top, since
+   * a body is not a symmetric rod and never spins about one clean axis.
+   */
+  _spin(dir, hitY) {
+    const centre = _v3.copy(this.p.pelvis.pos).add(this.p.chest.pos).multiplyScalar(0.5);
+    const lever = _v4.set(0, (hitY == null ? centre.y : hitY) - centre.y, 0);
+    const omega = _v5.crossVectors(lever, dir).multiplyScalar(ZEROG_SPIN);
+    omega.x += (Math.random() - 0.5) * 1.5;
+    omega.y += (Math.random() - 0.5) * 1.5;
+    omega.z += (Math.random() - 0.5) * 1.5;
+
+    const dt = 1 / 60;
+    const r = new THREE.Vector3();
+    const v = new THREE.Vector3();
+    for (const part of Object.values(this.p)) {
+      r.subVectors(part.pos, centre);
+      v.crossVectors(omega, r);
+      part.prev.addScaledVector(v, -dt);
+    }
   }
 
   _collectFadeMaterials() {
@@ -189,7 +243,10 @@ export class Ragdoll {
       this._integrate(dt);
       for (let i = 0; i < ITERATIONS; i++) this._solve();
       this._collide();
-      this._checkSleep(dt);
+      // Sleeping is for bodies that have come to rest on something. Nothing in
+      // orbit ever does, so a body that is allowed to fall asleep out here just
+      // freezes mid-air -- which is the exact opposite of floating.
+      if (!this.zeroG) this._checkSleep(dt);
     }
 
     this._driveBones();
@@ -206,25 +263,25 @@ export class Ragdoll {
   }
 
   _integrate(dt) {
-    // Maps can turn the pull off. In orbit a body keeps whatever motion the round
-    // that killed it gave it, so the extra drag below is the only thing that ever
-    // brings it to rest -- otherwise it drifts until it is culled.
-    const scale = mapInfo()?.environment?.gravityScale ?? 1;
-    const g = GRAVITY * scale * dt * dt;
-    const drag = scale === 0 ? Math.exp(-0.55 * dt) : 1;
+    const g = this.zeroG ? 0 : GRAVITY * dt * dt;
+    const damping = this.zeroG ? ZEROG_DAMPING : DAMPING;
+    const drag = this.zeroG ? Math.exp(-ZEROG_DRAG * dt) : 1;
+
     for (const part of Object.values(this.p)) {
       const px = part.pos.x, py = part.pos.y, pz = part.pos.z;
-      let vx = (px - part.prev.x) * DAMPING;
-      let vy = (py - part.prev.y) * DAMPING;
-      let vz = (pz - part.prev.z) * DAMPING;
+      let vx = (px - part.prev.x) * damping;
+      let vy = (py - part.prev.y) * damping;
+      let vz = (pz - part.prev.z) * damping;
 
-      // Ground friction, applied to whatever is actually touching the snow.
-      if (part.grounded) {
+      // Ground friction, applied to whatever is actually touching the snow. There
+      // is no such thing in orbit: brushing the hull should deflect a body, not
+      // grab it and hold it there.
+      if (!this.zeroG && part.grounded) {
         vx *= 0.72;
         vz *= 0.72;
       }
-
       if (drag !== 1) { vx *= drag; vy *= drag; vz *= drag; }
+
       part.pos.set(px + vx, py + vy + g, pz + vz);
       part.prev.set(px, py, pz);
     }

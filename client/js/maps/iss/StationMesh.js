@@ -368,12 +368,16 @@ function decorateModule(part, len, out) {
   const rr = part.rOut + 0.045;
   for (let i = 1; i < ribs; i++) {
     const a = part.from + (len * i) / ribs;
-    const pieces = [new THREE.CylinderGeometry(rr, rr, 0.16, SEG, 1, true)];
-    for (const end of [0, 1]) {
-      const ring = new THREE.RingGeometry(part.rOut, rr, SEG);
-      ring.rotateX(end ? Math.PI / 2 : -Math.PI / 2);
-      ring.translate(0, end ? -0.08 : 0.08, 0);
-      pieces.push(ring);
+    // Swaged, not a square collar: two short cones out to the band and back. A
+    // square shoulder puts a flat face on the rib whose normal points ALONG the
+    // module, and a raised band whose only normals run parallel to the hull is a
+    // surface whose overhang cannot be measured from its own normal.
+    const pieces = [new THREE.CylinderGeometry(rr, rr, 0.10, SEG, 1, true)];
+    for (const end of [-1, 1]) {
+      const cone = new THREE.CylinderGeometry(
+        end > 0 ? part.rOut : rr, end > 0 ? rr : part.rOut, 0.07, SEG, 1, true);
+      cone.translate(0, end * 0.085, 0);
+      pieces.push(cone);
     }
     const g = orient(mergeGeometries(pieces), part.axis);
     const p = [0, 0, 0];
@@ -433,21 +437,30 @@ function placeRadial(geo, part, a) {
   return geo;
 }
 
-/** Seven windows and the frames between them. All inside the 29 cm wall. */
+/**
+ * Seven windows and the frames between them, all inside the 29 cm dome wall.
+ *
+ * The X dimension of each box is its RADIAL thickness, not its width. Rotating by
+ * -ang about Y sweeps local +X round to point outward, so the thin axis has to be
+ * the one that ends up radial -- get that the wrong way round and a 94 cm pane lies
+ * flat against the curve and pokes a third of a metre out through the hull, where
+ * there is no collider to stop a shot.
+ */
 function decorateCupola(part, len, out) {
   const rMid = (part.rIn + part.rOut) * 0.5;
+  const midY = (part.from + part.to) * 0.5;
   for (let i = 0; i < 6; i++) {
     const ang = (i / 6) * Math.PI * 2;
     const cx = Math.cos(ang) * rMid, cz = Math.sin(ang) * rMid;
     // window pane, sunk into the wall
-    const pane = angledBox(0.94, len * 0.62, 0.16, [part.u + cx, 0, part.v + cz], [0, -ang, 0]);
-    pane.translate(0, (part.from + part.to) * 0.5, 0);
+    const pane = angledBox(0.16, len * 0.62, 0.94, [part.u + cx, 0, part.v + cz], [0, -ang, 0]);
+    pane.translate(0, midY, 0);
     out('glass', pane);
     // mullion between this pane and the next
     const mAng = ang + Math.PI / 6;
     const mx = Math.cos(mAng) * rMid, mz = Math.sin(mAng) * rMid;
-    const mull = angledBox(0.26, len * 0.9, 0.30, [part.u + mx, 0, part.v + mz], [0, -mAng, 0]);
-    mull.translate(0, (part.from + part.to) * 0.5, 0);
+    const mull = angledBox(0.24, len * 0.9, 0.26, [part.u + mx, 0, part.v + mz], [0, -mAng, 0]);
+    mull.translate(0, midY, 0);
     out('white', mull);
   }
 }
@@ -500,17 +513,26 @@ function trussParts(part, out) {
   }
 }
 
-/** Blankets get a cell grid on the sunward face and plain backing underneath. */
+/**
+ * Blankets get a cell grid on the sunward face and plain backing underneath.
+ *
+ * The panel is drawn INSET inside its collider and the battens fill the rest, so a
+ * batten stands proud of the blanket without standing proud of the thing that stops
+ * a bullet. Drawn the obvious way -- panel at full thickness, battens 3 cm outside
+ * it -- a grazing shot passes clean through a rib you can plainly see.
+ */
 function blanketParts(part, out) {
   const { min, max } = part;
-  const mid = (min[1] + max[1]) * 0.5;
-  out('solar', boxGeo([min[0], mid, min[2]], [max[0], max[1], max[2]]));
-  out('solarBack', boxGeo([min[0], min[1], min[2]], [max[0], mid, max[2]]));
+  const INSET = 0.05;
+  const lo = min[1] + INSET, hi = max[1] - INSET;
+  const mid = (lo + hi) * 0.5;
+  out('solar', boxGeo([min[0], mid, min[2]], [max[0], hi, max[2]]));
+  out('solarBack', boxGeo([min[0], lo, min[2]], [max[0], mid, max[2]]));
   // The tensioning battens across the blanket, which is what breaks up the sheet.
   const n = Math.max(3, Math.round((max[2] - min[2]) / 2.4));
   for (let i = 1; i < n; i++) {
     const z = min[2] + ((max[2] - min[2]) * i) / n;
-    out('metal', boxGeo([min[0], min[1] - 0.03, z - 0.05], [max[0], max[1] + 0.03, z + 0.05]));
+    out('metal', boxGeo([min[0], min[1], z - 0.05], [max[0], max[1], z + 0.05]));
   }
 }
 

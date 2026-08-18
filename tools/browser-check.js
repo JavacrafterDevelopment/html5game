@@ -144,15 +144,42 @@
     Math.hypot(rag.p.pelvis.pos.x - bx, rag.p.pelvis.pos.z - bz) < 2.5,
     `${Math.hypot(rag.p.pelvis.pos.x - bx, rag.p.pelvis.pos.z - bz).toFixed(2)} m away`);
 
-  const dropY = rag.p.pelvis.pos.y;
-  for (let i = 0; i < 200; i++) rag.update(1 / 60);
   const M = await import('/shared/maps/active.js');
   if (M.mapInfo().environment.gravityScale === 0) {
-    // In orbit a body does not settle -- it drifts. Falling is the failure here.
-    check('a body in free fall does not sink toward a floor that is not there',
-      rag.p.pelvis.pos.y > dropY - 0.6,
-      `${(rag.p.pelvis.pos.y - dropY).toFixed(2)} m after 3.3 s`);
+    // A drifting body is allowed to go downward -- it is allowed to go any way it
+    // likes. What it must not do is go downward FASTER as time passes, which is the
+    // only thing that distinguishes drifting from falling. Comparing the descent in
+    // two equal halves catches gravity and does not care which way the body drifts.
+    // Centre of mass, not the pelvis: the body is tumbling, and a rotating pelvis
+    // swings around by more than gravity would move it in the same time.
+    //
+    // The test is that the body does not SPEED UP. It is free to drift in any
+    // direction, including downward, and glancing off the station will slow it --
+    // the solver has no restitution, so nothing here can add energy. Gravity is the
+    // only thing that could, and it would add 22 m/s of it every second.
+    // Plain numbers: this runs before the ISS section, which is where THREE gets
+    // imported.
+    const com = () => {
+      const parts = Object.values(rag.p);
+      let x = 0, y = 0, z = 0;
+      for (const p of parts) { x += p.pos.x; y += p.pos.y; z += p.pos.z; }
+      return [x / parts.length, y / parts.length, z / parts.length];
+    };
+    const gap = (a2, b2) => Math.hypot(a2[0] - b2[0], a2[1] - b2[1], a2[2] - b2[2]);
+    const T = 100 / 60;
+    const c0 = com();
+    for (let i = 0; i < 100; i++) rag.update(1 / 60);
+    const c1 = com();
+    for (let i = 0; i < 100; i++) rag.update(1 / 60);
+    const c2 = com();
+    const v1 = gap(c0, c1) / T, v2 = gap(c1, c2) / T;
+    check('a body in free fall drifts instead of falling', v2 <= v1 + 0.5,
+      `${v1.toFixed(2)} m/s then ${v2.toFixed(2)} m/s`);
+    check('a body in free fall keeps tumbling instead of freezing', !rag.asleep);
   } else {
+    const dropY = rag.p.pelvis.pos.y;
+    void dropY;
+    for (let i = 0; i < 200; i++) rag.update(1 / 60);
     let sunk = 0;
     for (const p of Object.values(rag.p)) sunk = Math.min(sunk, p.pos.y - M.heightAt(p.pos.x, p.pos.z));
     check('settled ragdoll stays above ground', sunk > -0.05, `${sunk.toFixed(3)} m`);
@@ -230,31 +257,71 @@
       `travelled ${(-12 - g.player.pos[2]).toFixed(1)} m in a second`);
 
     // Nothing floats and nothing is drawn outside what stops a bullet. This is the
-    // check the plains map never had: fire rays at the station from every side and
-    // demand that the drawn surface and the collision surface agree. Anything drawn
-    // WELL PROUD of its collider is scenery you can fly through.
+    // check the plains map never had: hit the station with rays from every side and
+    // measure, at each hit, how far the drawn surface stands proud of the surface
+    // that stops a bullet.
+    //
+    // Measured along the face NORMAL, not along the ray. Comparing ray distances
+    // sounds equivalent and is not: a ray grazing a 4 cm hull rib misses the module
+    // behind it completely, which scores as infinitely proud when the rib is 4 cm
+    // proud. Stepping just off the surface and probing straight back into it gives
+    // the actual thickness of the lie, at any angle of incidence.
     const rc = new THREE.Raycaster();
     const origin = new THREE.Vector3(), dir = new THREE.Vector3(), target = new THREE.Vector3();
+    const nrm = new THREE.Vector3(), probe = new THREE.Vector3();
     const b = iss.STATION_BOUNDS;
+    // Seeded, not Math.random: an overhang this thin turns up on about one ray in
+    // five hundred, so an unseeded version of this passes and fails at random and is
+    // worse than useless. Same 1,600 rays every run.
+    let seed = 0x5eed;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    const LIFT = 0.02, REACH = 1.2;
     let compared = 0, worst = 0, ghosts = [];
-    for (let i = 0; i < 700; i++) {
-      const a1 = Math.random() * Math.PI * 2, e = (Math.random() - 0.5) * Math.PI;
+    for (let i = 0; i < 1600; i++) {
+      const a1 = rnd() * Math.PI * 2, e = (rnd() - 0.5) * Math.PI;
       origin.set(Math.cos(a1) * Math.cos(e), Math.sin(e), Math.sin(a1) * Math.cos(e)).multiplyScalar(74);
       target.set(
-        b.min[0] + Math.random() * (b.max[0] - b.min[0]),
-        b.min[1] + Math.random() * (b.max[1] - b.min[1]),
-        b.min[2] + Math.random() * (b.max[2] - b.min[2]));
+        b.min[0] + rnd() * (b.max[0] - b.min[0]),
+        b.min[1] + rnd() * (b.max[1] - b.min[1]),
+        b.min[2] + rnd() * (b.max[2] - b.min[2]));
       dir.subVectors(target, origin).normalize();
       rc.set(origin, dir);
       const hit = rc.intersectObject(g.map.station, true)[0];
-      if (!hit) continue;
-      const solid = iss.raycastWorld(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, 400);
+      if (!hit || !hit.face) continue;
       compared++;
-      // Drawn surface in FRONT of the collider by more than a handrail's depth.
-      const proud = solid ? solid.dist - hit.distance : 999;
+
+      // Cheapest test first: if the collider stopped at or before the drawn
+      // surface, that surface is not proud of anything. This is the ordinary case
+      // for everything drawn INSIDE a solid -- truss bracing, window mullions --
+      // and it has to be handled here, because the normal probe below starts inside
+      // the collider for those and measures its way out the far side.
+      const along = iss.raycastWorld(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, 400);
+      let proud;
+      if (along && along.dist <= hit.distance + 1e-3) {
+        proud = 0;
+      } else {
+        // Stand just off the drawn surface and find the nearest solid from there.
+        // Probing only along the face normal has a blind spot: hit the END face of
+        // a handrail and its normal runs parallel to the hull, so the probe never
+        // reaches the module it is bolted to. Sweeping the axes as well turns this
+        // into an honest "how far is the nearest thing that stops a bullet".
+        nrm.copy(hit.face.normal).normalize();
+        if (nrm.dot(dir) > 0) nrm.negate();
+        probe.copy(hit.point).addScaledVector(nrm, LIFT);
+        proud = REACH;
+        const dirs = [[-nrm.x, -nrm.y, -nrm.z],
+          [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+        for (const d of dirs) {
+          const s2 = iss.raycastWorld(probe.x, probe.y, probe.z, d[0], d[1], d[2], REACH);
+          if (s2) proud = Math.min(proud, Math.max(0, s2.dist - LIFT));
+        }
+        // The ray-along measurement is an upper bound too; believe whichever is
+        // smaller, since either one finding solid geometry proves it is there.
+        if (along) proud = Math.min(proud, along.dist - hit.distance);
+      }
       if (proud > worst) worst = proud;
       if (proud > 0.3 && ghosts.length < 6) {
-        ghosts.push(`${hit.object.name} ${proud.toFixed(2)}m proud`);
+        ghosts.push(`${hit.object.name} ${proud.toFixed(2)}m proud at ${hit.point.toArray().map((v) => v.toFixed(1))}`);
       }
     }
     check('drawn geometry never sticks out past its collider', ghosts.length === 0,

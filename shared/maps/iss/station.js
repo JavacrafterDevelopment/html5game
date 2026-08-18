@@ -253,8 +253,12 @@ for (const x of WINGS) {
   // Masts run the full length of their blanket: nothing is cantilevered off air.
   box(`mast-${tag}-f`, 'mast', [x - 0.38, 7.62, -26.40], [x + 0.38, 8.38, -1.40]);
   box(`mast-${tag}-a`, 'mast', [x - 0.38, 7.62, -2.60], [x + 0.38, 8.38, 22.40]);
-  box(`saw-${tag}-f`, 'blanket', [x - 5.60, 7.94, -26.40], [x + 5.60, 8.06, -4.20], KIND.SOLAR);
-  box(`saw-${tag}-a`, 'blanket', [x - 5.60, 7.94, 0.20], [x + 5.60, 8.06, 22.40], KIND.SOLAR);
+  // 22 cm thick, not the 12 cm the panel is drawn at. The tensioning battens have
+  // to stand proud of the blanket to read as battens, and the only way they can do
+  // that without standing proud of the collider is if the collider has room for
+  // them -- see blanketParts() in StationMesh.js.
+  box(`saw-${tag}-f`, 'blanket', [x - 5.60, 7.89, -26.40], [x + 5.60, 8.11, -4.20], KIND.SOLAR);
+  box(`saw-${tag}-a`, 'blanket', [x - 5.60, 7.89, 0.20], [x + 5.60, 8.11, 22.40], KIND.SOLAR);
   // Photovoltaic radiator, hung off the nadir face beside the gimbal.
   box(`pvr-${tag}`, 'radiator', [x - 3.40, 1.80, TRUSS_Z0 + 0.55], [x + 3.40, TRUSS_Y0, TRUSS_Z0 + 0.75], KIND.RADIATOR);
 }

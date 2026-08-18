@@ -556,6 +556,9 @@ export class Game {
   _onPlayerDied(msg) {
     const rp = this.remotes.get(msg.id);
     if (!rp) return;
+    // Read before detaching: the body carries on the way its owner was going, which
+    // is the whole difference between a corpse dropping and a corpse being flung.
+    const vel = [rp.vel.x, rp.vel.y, rp.vel.z];
     const soldier = rp.detachForRagdoll();
     this.blood.pool([rp.renderPos.x, rp.renderPos.y, rp.renderPos.z], 1.1 + Math.random() * 0.5);
     this.blood.forget(msg.id);
@@ -563,7 +566,7 @@ export class Game {
       impulse: msg.dir,
       hitY: msg.hitY,
       headshot: msg.headshot,
-      velocity: [0, 0, 0]
+      velocity: vel
     });
   }
 

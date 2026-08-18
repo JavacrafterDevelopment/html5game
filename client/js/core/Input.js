@@ -128,11 +128,16 @@ export class Input {
   /**
    * Side thrusters, on maps that have them. E banks right, Q banks left, and the
    * bank holds where you leave it -- hold one long enough and you are upside down.
+   *
+   * E is NEGATIVE, which looks backwards and is not. The camera looks down its own
+   * -Z, so a positive rotation about that axis turns the IMAGE clockwise, which
+   * takes the right-hand side of the horizon down -- and a horizon whose right side
+   * drops is what banking LEFT looks like from the cockpit.
    */
   rollAxis() {
     let r = 0;
-    if (this.isDown('KeyE')) r += 1;
-    if (this.isDown('KeyQ')) r -= 1;
+    if (this.isDown('KeyE')) r -= 1;
+    if (this.isDown('KeyQ')) r += 1;
     return r;
   }
 

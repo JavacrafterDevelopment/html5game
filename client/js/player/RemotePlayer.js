@@ -68,6 +68,9 @@ export class RemotePlayer {
     this.renderPitch = 0;
     this.renderRoll = 0;
     this.speed = 0;
+    /** Rendered velocity, so a corpse can inherit the motion it died with. */
+    this.vel = new THREE.Vector3();
+    this._instVel = new THREE.Vector3();
     this.alive = true;
     this.weaponId = opts.weaponId || 'ak47';
     this.visible = true;
@@ -208,6 +211,12 @@ export class RemotePlayer {
     if (dt > 0) {
       const instant = this.prevRenderPos.distanceTo(this.renderPos) / dt;
       this.speed = damp(this.speed, Math.min(instant, 12), 12, dt);
+      // The same measurement as a vector, for the ragdoll to inherit. Clamped,
+      // because a respawn or a snapshot gap looks like a 300 m/s teleport and a
+      // corpse launched at that speed is gone before you see it.
+      this._instVel.subVectors(this.renderPos, this.prevRenderPos).divideScalar(dt);
+      if (this._instVel.lengthSq() > 400) this._instVel.setLength(20);
+      this.vel.lerp(this._instVel, 1 - Math.exp(-14 * dt));
     }
 
     this.container.position.copy(this.renderPos);
@@ -300,6 +309,7 @@ export class RemotePlayer {
     this.soldier.group.visible = true;
     this.animator.reset();
     this.speed = 0;
+    this.vel.set(0, 0, 0);
     this.buffer.length = 0;
   }
 

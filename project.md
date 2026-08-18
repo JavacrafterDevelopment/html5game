@@ -404,8 +404,14 @@ Velocity approaches the commanded speed exponentially rather than being set outr
 (thrusters have a spool-up) and coasts back down on a much slower constant, so
 letting go leaves you drifting instead of stopping dead.
 
-Two details that are easy to get wrong:
+Three details that are easy to get wrong:
 
+- **The sign of the roll is not the one you would guess.** The camera looks down its
+  own −Z, so a *positive* rotation about that axis turns the image clockwise and
+  drops the right-hand side of the horizon — which is what banking **left** looks
+  like from inside. `E` therefore feeds a NEGATIVE roll. Written the obvious way
+  round, both keys do the opposite of what they say, which is exactly how they
+  shipped the first time.
 - **Banked over, the mouse has to be rotated too.** Yaw is a world-Y rotation, so at
   180° of bank a right-hand mouse move turns you left on screen. `look()` rotates the
   incoming delta by the bank angle, which keeps "mouse right" meaning right as you
@@ -425,11 +431,34 @@ ragdoll solver never learn there are two kinds of person in this game. Remote pl
 hang off their midriff rather than their feet in free fall and carry pitch and bank
 with them, so somebody flying head-first down a module looks like it.
 
-**Bodies drift.** `environment.gravityScale` is 0, which the ragdoll solver, the
-impact debris and the blood all read. A body you shoot keeps whatever motion the
-round gave it and tumbles away; a round into the hull throws a spray of bright metal
-that travels dead straight until it is out of sight. Nothing falls, because there is
-nothing to fall to.
+**Bodies tumble.** `environment.gravityScale` is 0, which the ragdoll solver, the
+impact debris and the blood all read. A round into the hull throws a spray of bright
+metal that travels dead straight until it is out of sight, and a body you shoot
+inherits the motion its owner had, spins, and drifts away.
+
+Four separate things had to change for that last part, because the solver was built
+for corpses that land and stay landed:
+
+- **Damping** goes from 0.986 per step to 0.9995. Air is what slows a tumbling body
+  and there is none; at the ground value a corpse loses more than half its speed
+  every second and stops looking like it is in orbit almost immediately. A slow
+  separate bleed (6%/s) is kept so a body settles into a gentle drift after half a
+  minute rather than leaving the map.
+- **Sleeping is off.** Bodies sleep when they come to rest on something. Nothing out
+  here ever does, so a body allowed to fall asleep just freezes in mid-air — the
+  exact opposite of floating.
+- **Ground friction is off**, so brushing the hull deflects a body instead of
+  grabbing it.
+- **Spin is seeded explicitly.** Verlet has no angular velocity to set, so the
+  rotation goes straight into the particle velocities as *v = ω × r* about the body's
+  middle, and the distance constraints carry it from there. The axis comes from
+  where the round landed — torque is lever × force — so a square hit on the chest
+  barely turns anybody and a head shot sends them end over end. A body that
+  translates without rotating reads instantly as a prop being slid along a table.
+
+The corpse also inherits its owner's velocity now, which `RemotePlayer` measures
+from its own rendered motion. That was previously hardcoded to zero for everyone but
+the local player.
 
 #### The station is one list
 
