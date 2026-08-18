@@ -754,7 +754,11 @@ export class Game {
     const w = this.weapons.weapon;
     const scopeAmount = w.scope ? clamp((this.viewModel.adsBlend - 0.55) / 0.4, 0, 1) : 0;
     this.scope.update(dt, scopeAmount, {
-      steady: this.player.crouching && this.player.speed < 0.4,
+      // Steady means braced and still. Crouching is how you brace on the ground;
+      // in free fall there is nothing to brace against, so being still is all of
+      // it -- and requiring a crouch that can never happen left the scope swaying
+      // at full amplitude for the entire map.
+      steady: this.player.speed < 0.4 && (this.player.crouching || this.player.flying),
       moving: clamp(this.player.speed / MOVE.WALK, 0, 1)
     });
     this.hud.setScoped(scopeAmount > 0.5);
@@ -860,8 +864,12 @@ export class Game {
 
   _render() {
     // The magnified pass has to happen before the frame is drawn, and must not
-    // include the first-person weapon.
-    this.scope.render(this.scene, this.camera, [this.viewModel.root]);
+    // include the first-person weapon -- nor any screen-space overlay the map owns
+    // (the sun glare), which is drawn for the eye and would be wrong through glass.
+    const hide = this.map.overlays
+      ? [this.viewModel.root, ...this.map.overlays]
+      : [this.viewModel.root];
+    this.scope.render(this.scene, this.camera, hide);
     this.renderer.render(this.scene, this.camera);
     this.scope.composite();
   }

@@ -150,6 +150,7 @@ html5game/
 │           ├── index.js         map bundle + zero-g movement profile
 │           ├── terrain.js       the ABSENCE of terrain, stated explicitly
 │           ├── station.js       every part of the station, as data. one list.
+│           ├── asteroids.js     the rocks, likewise. some with holes through them.
 │           └── collision.js     collider list + validated spawn points
 │
 ├── client/                    ← everything the browser loads
@@ -201,6 +202,8 @@ html5game/
 │       │   └── iss/
 │       │       ├── ISSMap.js           scene assembly
 │       │       ├── StationMesh.js      station drawn from the shared parts list
+│       │       ├── Asteroids.js        rocks drawn from the shared parts list
+│       │       ├── SunGlare.js         full-screen glare, occluded by the station
 │       │       └── Sky.js              starfield, sun, Earth, light rig, cabin lamps
 │       ├── effects/
 │       │   ├── Snowfall.js      GPU snow, camera-tiled
@@ -529,6 +532,39 @@ through each doorway on the real map to prove it is open. Plugging the doors mat
 — without it a genuine hull leak can hide behind "well, it probably went out of a
 hatch".
 
+#### The rocks
+
+A field of seventeen asteroids sits round the station, above and below it and off
+both ends -- the open volumes a fight actually crosses, and the ones that had
+nothing to hide behind. Six of them have a hole bored straight through that you can
+fly down, which is the tube primitive again: a rock with a tunnel in it is exactly
+the shape the collider already had a name for.
+
+Three things they are not allowed to do, all of them enforced:
+
+- **Foul the station or a flight lane.** Placement is rejection-sampled against the
+  station's own volume plus 7 m, and against two lanes: the length of the
+  pressurised stack, and straight out of the Quest airlock.
+- **Half-close their own tunnel.** The lumps hung on a holed rock for silhouette
+  are kept at least their own radius clear of the bore, so no lump can reach into
+  the hole. `tools/test-maps.mjs` flies a player through all six to prove it.
+- **Be drawn anywhere they are not.** The vertex displacement is only ±2.2% of the
+  radius. It is tempting to gnarl a rock far harder, and the moment you do, half its
+  surface is drawn outside its collider (visible rock you shoot straight through)
+  and the other half inside (bullets stopping in mid-air short of it). The bores are
+  not displaced at all: a tunnel you fly down has to be exactly the tunnel the
+  collider thinks it is.
+
+A holed rock is four collinear tube segments of different girth rather than one
+barrel, because a constant-radius tube reads as a length of pipe no matter what you
+stick to it. Each step is still exactly one collider, and the rings that bridge them
+are drawn only where the step is actually exposed -- otherwise every joint draws two
+coincident rings and z-fights with itself.
+
+The rocks are deliberately NOT attached to anything, which is why the station's
+"nothing floats" test is scoped to the station. Debris in orbit floats; that is what
+it is for.
+
 #### The sky
 
 Stars, one white sun and Earth are all drawn in the dome shader rather than as
@@ -564,6 +600,23 @@ compartment centres so a module cannot be added later and left dark. The panels 
 carry a dim self-illumination, because a strip light is emissive but does not *light*
 anything, and a module lit only that way is a black tube with four glowing lines in
 it.
+
+**Sun glare.** Looking anywhere near the sun blooms, throws a six-point starburst
+and a chain of lens ghosts down the line through the middle of the screen, and lifts
+the whole frame with veiling glare -- which is the part that actually costs you your
+target. It builds as you turn into it rather than switching on.
+
+It is drawn as one full-screen additive quad, not through a post-processing chain,
+because this project has no post chain and adding one for a single effect would cost
+every frame on every map. Its vertex shader writes clip space directly, which is
+also why it has to be kept out of the scope's second pass: through a 13 degree lens
+the sun is somewhere else entirely. `Game._render` hands `map.overlays` to
+`Scope.render` to hide for exactly that reason.
+
+The detail that makes it read as light rather than as a sticker on the lens is that
+it is **occluded**: one ray per frame through the shared collider, so putting a solar
+array between yourself and the sun puts it out. That is the whole reason an array is
+worth hiding behind up here.
 
 **The Cupola** is a dead end you can fly into and look out of. Its panes are actually
 transparent — opaque glass turns the best window on the station into a dark hole —
@@ -645,7 +698,7 @@ down with magnification.
 
 ### Recoil
 
-There are two independent recoils and they serve different purposes.
+There are two independent recoils on the ground and a third in orbit.
 
 **Aim recoil** (`feel.recoilV/recoilH`) is a camera kick that partially recovers;
 the remainder is drift you have to correct yourself. This one is gameplay.
@@ -666,8 +719,29 @@ Across a 12-round burst that works out to:
 | Glock 17 | 1.2° | 0.4° | 0.3° |
 | M700 (3 shots) | 4.0° | 1.3° | 0.7° |
 
+**Momentum recoil** (`recoilPush` in the map's movement profile, times the weapon's
+`kickBack`) only exists where nothing is bracing you. On the ground the recoil of a
+rifle goes into the planet through your boots; in orbit it goes into you. Every round
+shoves you back down the barrel at about 0.18 m/s for a rifle and 0.43 m/s for the
+M700, so a sustained burst has you travelling backwards unless you hold W against it.
+
+That interacts with spread on purpose: drifting widens your cone, so spraying costs
+you accuracy twice over — once from the shot-to-shot spread, and once from the
+movement your own recoil just gave you.
+
 Spread grows per shot and with movement, and the crosshair gap is computed from the
 real cone angle, so the crosshair never lies to you.
+
+**A bug worth recording.** Spread carries a penalty for being airborne, to punish
+jumping and firing. In orbit you are *never* grounded, so every weapon carried that
+penalty permanently — on the M700 that is 0.10 rad against an aimed spread of 0.0002,
+five hundred times too wide, and the sniper was simply broken on that map. The
+airborne term now only applies where there is a ground to be off
+(`movement.airborneSpread`), and what replaces it is the movement term that was
+already there: hold still in vacuum and you are the steadiest firing platform there
+is (2 cm at 100 m); drift and you are not (5 m at 100 m at full speed). The scope's
+"steady" test had the same shape of bug — it required a crouch, which can never
+happen in free fall, so the sight swayed at full amplitude for the entire map.
 
 ### Muzzle flash
 
@@ -813,7 +887,9 @@ There are, deliberately, no hit or kill sounds anywhere in `AudioEngine.js`.
 
 In orbit the same keys mean the same things pointed somewhere new: W and S still go
 forward and back, they just follow where you are looking; space and crouch become
-up and down thrusters; shift is a boost rather than a sprint. `Q` and `E` are new,
+up and down thrusters; shift is a boost rather than a sprint. W does one more job
+out there: every round you fire shoves you backwards, and holding it is how you
+stop drifting away from the fight. `Q` and `E` are new,
 and the bank they put in holds where you leave it — see [§5.3](#orbital--the-iss).
 
 While the chat box is open the keyboard belongs to it: typing "wasd" in a message

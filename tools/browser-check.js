@@ -235,6 +235,10 @@
       roll: 1, lift: 0, ads: false, speedMult: 1, frozen: false };
     g.player.pos = [0, -0.46, -12];
     g.player.roll = 0;
+    g.player.rollVel = 0;
+    // Levelled first: the camera up-vector assertion below reads pitch as well as
+    // bank, so whatever ran before this must not be able to tilt the answer.
+    g.player.pitch = 0;
     for (let i = 0; i < 110; i++) g.player.update(1 / 60, st);
     const rolled = g.player.roll;
     st.roll = 0;
@@ -279,14 +283,23 @@
     let compared = 0, worst = 0, ghosts = [];
     for (let i = 0; i < 1600; i++) {
       const a1 = rnd() * Math.PI * 2, e = (rnd() - 0.5) * Math.PI;
-      origin.set(Math.cos(a1) * Math.cos(e), Math.sin(e), Math.sin(a1) * Math.cos(e)).multiplyScalar(74);
-      target.set(
-        b.min[0] + rnd() * (b.max[0] - b.min[0]),
-        b.min[1] + rnd() * (b.max[1] - b.min[1]),
-        b.min[2] + rnd() * (b.max[2] - b.min[2]));
+      origin.set(Math.cos(a1) * Math.cos(e), Math.sin(e), Math.sin(a1) * Math.cos(e)).multiplyScalar(95);
+      // Aim at the station most of the time, at a rock the rest.
+      if (rnd() < 0.45) {
+        const rock = iss.ASTEROID_GROUPS[Math.floor(rnd() * iss.ASTEROID_GROUPS.length)];
+        target.set(rock.x + (rnd() - 0.5) * rock.r, rock.y + (rnd() - 0.5) * rock.r,
+          rock.z + (rnd() - 0.5) * rock.r);
+      } else {
+        target.set(
+          b.min[0] + rnd() * (b.max[0] - b.min[0]),
+          b.min[1] + rnd() * (b.max[1] - b.min[1]),
+          b.min[2] + rnd() * (b.max[2] - b.min[2]));
+      }
       dir.subVectors(target, origin).normalize();
       rc.set(origin, dir);
-      const hit = rc.intersectObject(g.map.station, true)[0];
+      // Rocks as well as the station. They are the ones with displaced vertices,
+      // so they are the ones most likely to drift outside their own colliders.
+      const hit = rc.intersectObjects([g.map.station, g.map.rocks], true)[0];
       if (!hit || !hit.face) continue;
       compared++;
 
@@ -326,6 +339,72 @@
     }
     check('drawn geometry never sticks out past its collider', ghosts.length === 0,
       ghosts.length ? ghosts.join('; ') : `${compared} rays, worst overhang ${worst.toFixed(2)} m`);
+
+    // ---- the rocks ----
+    check('there are rocks to hide behind', iss.ASTEROID_GROUPS.length >= 10,
+      `${iss.ASTEROID_GROUPS.length} rocks`);
+    const holed = new Set(iss.ASTEROID_PARTS.filter((p) => p.s === 'tube')
+      .map((p) => p.name.replace(/s\d+$/, '')));
+    check('some of them have a hole through them', holed.size >= 4, `${holed.size} holed`);
+
+    // ---- the sun ----
+    // Glare has to be occluded or it is a sticker on the lens rather than light.
+    const env = g.map.env;
+    const sd = new THREE.Vector3(
+      Math.cos(env.sunElevation) * Math.cos(env.sunAzimuth),
+      Math.sin(env.sunElevation),
+      Math.cos(env.sunElevation) * Math.sin(env.sunAzimuth));
+    g.player.pos = [0, 40, 50];
+    g.player.yaw = Math.atan2(-sd.x, -sd.z);
+    g.player.pitch = Math.asin(sd.y);
+    for (let i = 0; i < 90; i++) {
+      g.player.update(1 / 60, st);
+      g.map.update(1 / 60, g.camera);
+    }
+    check('the sun glares when you look at it', g.map.glare.amount > 0.9,
+      g.map.glare.amount.toFixed(2));
+    // Now get into the shadow of a solar array: step back along the sun line from
+    // the middle of a starboard blanket, so the blanket is between us and the sun.
+    g.player.pos = [33 - sd.x * 14, 8 - sd.y * 14, 11 - sd.z * 14];
+    const shaded = iss.raycastWorld(g.player.pos[0], g.player.pos[1] + 0.46, g.player.pos[2],
+      sd.x, sd.y, sd.z, 400);
+    for (let i = 0; i < 150; i++) {
+      g.player.update(1 / 60, st);
+      g.map.update(1 / 60, g.camera);
+    }
+    check('and goes out when something is in the way', !!shaded && g.map.glare.amount < 0.05,
+      shaded ? g.map.glare.amount.toFixed(2) : 'test spot is not actually shaded');
+
+    // ---- recoil as momentum ----
+    // Firing has to move you, or holding W to counter it means nothing.
+    g.player.pos = [0, -0.46, -12];
+    g.player.vel.set(0, 0, 0);
+    g.player.yaw = 0; g.player.pitch = 0;
+    g.player.update(1 / 60, st);
+    const before = g.player.vel.z;
+    g.weapons.currentAmmo.mag = 30;
+    for (let i = 0; i < 8; i++) g.weapons._shoot(performance.now() + i * 200);
+    check('firing pushes you backwards', g.player.vel.z - before > 0.8,
+      `${(g.player.vel.z - before).toFixed(2)} m/s after 8 rounds`);
+
+    // ---- and the sniper works again ----
+    // Everything has to be reset: the burst just fired left the shot-to-shot
+    // spread accumulator loaded, and it survives a weapon change.
+    g.weapons.setLoadout('m700');
+    g.weapons.spread = 0;
+    g.viewModel.adsBlend = 1;
+    g.player.vel.set(0, 0, 0);
+    g.player.update(1 / 60, st);
+    g.viewModel.adsBlend = 1;
+    const spread = g.weapons.computeSpread();
+    check('a still shooter is accurate in zero-g', spread < 0.004,
+      `${(spread * 1000).toFixed(2)} mrad = ${(spread * 100 * 100).toFixed(1)} cm at 100 m`);
+    // ...and drifting is what costs you the shot, not standing still.
+    g.player.vel.set(0, 0, 4.5);
+    const moving = g.weapons.computeSpread();
+    check('drifting is what widens the cone', moving > spread * 8,
+      `${(moving * 100).toFixed(1)} m at 100 m while drifting`);
+    g.player.vel.set(0, 0, 0);
 
     // The stack is a clear shot end to end, which is what makes it a corridor.
     const through = iss.raycastWorld(0, 0, -8, 0, 0, -1, 400);

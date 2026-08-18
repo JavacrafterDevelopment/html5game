@@ -75,7 +75,13 @@ export function mapInfo() { return active.MAP_INFO; }
 export function movement() {
   return active.MAP_INFO.movement || DEFAULT_MOVEMENT;
 }
-const DEFAULT_MOVEMENT = { mode: 'ground' };
+const DEFAULT_MOVEMENT = {
+  mode: 'ground',
+  /** Being off the ground costs you accuracy, on maps that have a ground. */
+  airborneSpread: true,
+  /** Nothing pushes a player who is braced against the planet. */
+  recoilPush: 0
+};
 
 /** Character style the map wants: 'soldier' by default, 'astronaut' up in orbit. */
 export function characterStyle() { return active.MAP_INFO.characters || 'soldier'; }

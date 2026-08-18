@@ -341,7 +341,7 @@ function testOrbit(id, map) {
 
   // ------------------------------------------------ 3. the doorways are open
   // The other half of the same coin. A station you cannot get into is scenery.
-  const fly = (from, dir, steps = 900) => {
+  function fly(from, dir, steps = 900) {
     const pos = from.slice();
     for (let i = 0; i < steps; i++) {
       pos[0] += dir[0] * 12 * dt;
@@ -350,7 +350,7 @@ function testOrbit(id, map) {
       collideCapsule(pos, R, H, 0);
     }
     return pos;
-  };
+  }
   // Out of the node the airlock actually hangs off, down its real centreline.
   const home = [map.NODES[1].x, map.NODES[1].y - H * 0.5, map.NODES[1].z];
   const fore = fly([0, -H * 0.5, -42], [0, 0, 1]);
@@ -377,25 +377,119 @@ function testOrbit(id, map) {
   assert.ok(SPAWN_POINTS.length >= 20, `only ${SPAWN_POINTS.length} usable spawn points`);
   ok(`all ${SPAWN_POINTS.length} spawn points are in clear space`);
 
-  // ------------------------------------------------ 5. open space really is open
-  // The inverse of the ground map's phantom-push test: out here, away from the
-  // station, absolutely nothing may touch you.
-  let touched = 0;
-  for (let i = 0; i < 4000; i++) {
-    const a = Math.random() * Math.PI * 2, e = (Math.random() - 0.5) * Math.PI;
-    // Beyond 62 m nothing on the station reaches, and inside the soft boundary so
-    // the map's own edge is not what is being measured.
-    const rad = 62 + Math.random() * (TERRAIN.playRadius - 66);
+  // ------------------------------------------------ 5. every contact is real
+  // The ground maps' phantom-push test, in three dimensions: sample the open
+  // volume, and every time the solver moves the player, prove something solid was
+  // close enough to justify it. Once there are rocks out here, "nothing may ever
+  // touch you" is no longer the right assertion -- but "nothing may touch you that
+  // is not there" still is.
+  let sampled = 0, contacts = 0;
+  const phantoms = [];
+  for (let i = 0; i < 20000; i++) {
+    const a = Math.random() * Math.PI * 2, e = Math.asin(Math.random() * 2 - 1);
+    const rad = 14 + Math.random() * (TERRAIN.playRadius - 18);
     const p = [Math.cos(a) * Math.cos(e) * rad, Math.sin(e) * rad, Math.sin(a) * Math.cos(e) * rad];
     const before = p.slice();
+    sampled++;
     collideCapsule(p, R, H, 0);
-    if (Math.hypot(p[0] - before[0], p[1] - before[1], p[2] - before[2]) > 0.001) touched++;
+    if (Math.hypot(p[0] - before[0], p[1] - before[1], p[2] - before[2]) < 0.001) continue;
+    contacts++;
+    // Measured against the whole capsule, not just the point the sample names.
+    // That point is the FEET; something touching the top of a 0.92 m body is most
+    // of a metre away from it, and calling that a phantom would fail every
+    // legitimate contact above the waist.
+    let gap = Infinity;
+    for (let k = 0; k <= 4; k++) {
+      const q = [before[0], before[1] + (H * k) / 4, before[2]];
+      gap = Math.min(gap, nearestSolidGap(map.COLLIDERS, q));
+    }
+    if (gap > R + 0.15) {
+      phantoms.push({ at: before.map((v) => +v.toFixed(1)), gap: +gap.toFixed(2) });
+    }
   }
-  assert.strictEqual(touched, 0, `${touched} points in empty space pushed the player -- invisible walls`);
-  ok('4000 points of empty space beyond the structure, 0 contacts');
+  if (phantoms.length) console.error('  phantom contacts at:', phantoms.slice(0, 6));
+  assert.strictEqual(phantoms.length, 0,
+    `${phantoms.length} of ${contacts} contacts had nothing solid within reach -- invisible walls`);
+  ok(`${sampled} samples of open space, ${contacts} legitimate contacts, 0 invisible walls`);
+
+  // ------------------------------------------------ 6. the rocks
+  const bores = map.ASTEROID_PARTS.filter((r) => r.s === 'tube');
+  // A holed rock is several collinear segments, so count rocks, not segments.
+  const holedRocks = new Set(bores.map((r) => r.name.replace(/s\d+$/, '')));
+  assert.ok(map.ASTEROID_GROUPS.length >= 10,
+    `only ${map.ASTEROID_GROUPS.length} rocks -- not enough to take cover behind`);
+  assert.ok(holedRocks.size >= 4, `only ${holedRocks.size} rocks have a hole through them`);
+  ok(`${map.ASTEROID_GROUPS.length} rocks, ${holedRocks.size} of them holed`);
+
+  // A hole you cannot fly through is a texture. Enter each bore from well outside
+  // and require the player to come out the far end.
+  // Fly each rock's bore once, entering at the outermost segment.
+  const entries = new Map();
+  for (const t of bores) {
+    const k = t.name.replace(/s\d+$/, '');
+    const cur = entries.get(k);
+    if (!cur || t.from < cur.from) entries.set(k, t);
+  }
+  const flown = [];
+  for (const t of entries.values()) {
+    const perp = t.axis === 0 ? [1, 2] : t.axis === 1 ? [0, 2] : [0, 1];
+    const start = [0, 0, 0], step = [0, 0, 0];
+    start[t.axis] = t.from - 18;
+    start[perp[0]] = t.u;
+    start[perp[1]] = t.v;
+    start[1] -= H * 0.5;
+    step[t.axis] = 1;
+    const far = bores.filter((b) => b.name.replace(/s\d+$/, '') === t.name.replace(/s\d+$/, ''))
+      .reduce((m, b) => Math.max(m, b.to), -Infinity);
+    const end = fly(start, step, 700);
+    if (end[t.axis] > far + 6) flown.push(t.name);
+  }
+  assert.strictEqual(flown.length, entries.size,
+    `only ${flown.length} of ${entries.size} bores are actually flyable`);
+  ok(`all ${entries.size} bores can be flown straight through`);
+
+  // And the rocks must not have closed anything the station needs open.
+  for (const t of bores) {
+    assert.ok(t.rIn * 2 > PLAYER.FLIGHT_HEIGHT + 1.0,
+      `bore ${t.name} is only ${(t.rIn * 2).toFixed(1)} m across`);
+  }
 
   assert.ok(BORE * 2 > PLAYER.FLIGHT_HEIGHT + 1.0, 'the bore is too tight to fly a body down');
-  ok(`bore is ${(BORE * 2).toFixed(1)} m across, comfortably wider than a tucked body`);
+  ok(`module bore is ${(BORE * 2).toFixed(1)} m across, comfortably wider than a tucked body`);
+}
+
+/**
+ * Distance from a point to the nearest solid surface, 0 if inside one.
+ *
+ * This is what turns "the solver moved me" into "the solver moved me for a reason".
+ * Every shape the orbital map uses needs a case here; a shape that falls through
+ * would silently excuse a genuine invisible wall.
+ */
+function nearestSolidGap(colliders, p) {
+  let best = Infinity;
+  for (const c of colliders) {
+    let gap;
+    if (c.type === 0) {                            // box
+      const dx = Math.max(c.min[0] - p[0], 0, p[0] - c.max[0]);
+      const dy = Math.max(c.min[1] - p[1], 0, p[1] - c.max[1]);
+      const dz = Math.max(c.min[2] - p[2], 0, p[2] - c.max[2]);
+      gap = Math.hypot(dx, dy, dz);
+    } else if (c.type === 1) {                     // Y cylinder
+      const radial = Math.max(0, Math.hypot(p[0] - c.x, p[2] - c.z) - c.r);
+      const axial = Math.max(c.y0 - p[1], 0, p[1] - c.y1);
+      gap = Math.hypot(radial, axial);
+    } else if (c.type === 2) {                     // sphere
+      gap = Math.max(0, Math.hypot(p[0] - c.x, p[1] - c.y, p[2] - c.z) - c.r);
+    } else {                                       // tube
+      const perp = c.axis === 0 ? [1, 2] : c.axis === 1 ? [0, 2] : [0, 1];
+      const d = Math.hypot(p[perp[0]] - c.u, p[perp[1]] - c.v);
+      const radial = d > c.rOut ? d - c.rOut : (d < c.rIn ? c.rIn - d : 0);
+      const axial = Math.max(c.from - p[c.axis], 0, p[c.axis] - c.to);
+      gap = Math.hypot(radial, axial);
+    }
+    if (gap < best) best = gap;
+  }
+  return best;
 }
 
 for (const [id, map] of Object.entries(MAPS)) {

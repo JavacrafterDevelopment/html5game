@@ -7,6 +7,7 @@
 
 export { TERRAIN, heightAt, normalAt, slopeAt, isWalkable, radiusAt, boundaryPressure } from './terrain.js';
 export { STATION_PARTS, STATION_BOUNDS, TRUSS, WINGS, BORE, COLLAR_R, NODES, DOORWAYS, INTERIOR_PROBES, partBounds } from './station.js';
+export { ASTEROID_PARTS, ASTEROID_GROUPS } from './asteroids.js';
 export { collideCapsule, raycastWorld, raycastTerrain, isBlocked, KIND, COLLIDER_COUNT, COLLIDERS, SPAWN_POINTS } from './collision.js';
 
 export const MAP_INFO = {
@@ -31,7 +32,27 @@ export const MAP_INFO = {
     /** Roll rate on the Q/E side thrusters, radians per second. */
     rollRate: 1.85,
     /** Roll authority bleeds off when you let go, rather than stopping dead. */
-    rollDamp: 7.0
+    rollDamp: 7.0,
+
+    /**
+     * The airborne spread penalty exists to punish a player who jumped and lost
+     * their footing. Out here there is no footing to lose -- floating IS the
+     * standing position -- so applying it means every weapon permanently shoots
+     * like it is mid-jump. On the M700 that is five hundred times its aimed spread,
+     * which is why the sniper felt broken on this map and was.
+     *
+     * What replaces it is already in the weapon table: spreadMoveAdd. Hold still
+     * and you are the steadiest firing platform there is; drift and you are not.
+     */
+    airborneSpread: false,
+
+    /**
+     * Recoil as momentum. Multiplied by the weapon's kickBack to get metres per
+     * second of shove per round, so a Glock nudges and the M700 kicks properly.
+     * Fire a burst without holding W and you will end up going backwards -- and
+     * because drifting widens your cone, spraying costs you accuracy twice over.
+     */
+    recoilPush: 5.0
   },
 
   /** Everybody is in an EMU on this map. See client/js/characters/Soldier.js. */

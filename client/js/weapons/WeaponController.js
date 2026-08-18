@@ -13,7 +13,7 @@
 import * as THREE from '../core/three.js';
 import { getWeapon, fireIntervalMs, PRIMARY_CHOICES, DEFAULT_SECONDARY } from '/shared/weapons.js';
 import { WORLD, MOVE } from '/shared/config.js';
-import { raycastWorld } from '/shared/maps/active.js';
+import { raycastWorld, movement } from '/shared/maps/active.js';
 import { clamp, damp } from '/shared/math/num.js';
 
 const LEFT = 0, RIGHT = 2;
@@ -149,7 +149,9 @@ export class WeaponController {
     let s = base + this.spread;
     const moveFrac = clamp(p.speed / MOVE.WALK, 0, 1.6);
     s += feel.spreadMoveAdd * moveFrac;
-    if (!p.grounded) s += feel.spreadAirAdd;
+    // "Not grounded" means "jumped" on a map with a ground, and means nothing at
+    // all on one without. See MAP_INFO.movement.airborneSpread.
+    if (!p.grounded && movement().airborneSpread !== false) s += feel.spreadAirAdd;
     if (p.crouching) s *= 0.72;
     return Math.min(s, feel.spreadMax * 1.6);
   }
@@ -241,6 +243,10 @@ export class WeaponController {
       feel.recoilV * kickScale * (0.82 + Math.random() * 0.36),
       feel.recoilH * kickScale * (Math.random() - 0.5) * 2
     );
+    // Recoil as momentum, not just as a camera kick. Nothing on a ground map is
+    // pushed by a rifle because the planet takes it; nothing in orbit is not.
+    const push = movement().recoilPush;
+    if (push) this.player.pushBack(this._dir, feel.kickBack * push);
     this.view.fire();
 
     this.onFire?.({

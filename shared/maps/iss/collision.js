@@ -10,6 +10,7 @@
 
 import { TERRAIN, heightAt, normalAt } from './terrain.js';
 import { STATION_PARTS, STATION_BOUNDS } from './station.js';
+import { ASTEROID_PARTS } from './asteroids.js';
 import { PLAYER } from '../../config.js';
 import { makeRng } from '../../math/num.js';
 import { KIND } from '../kinds.js';
@@ -27,6 +28,13 @@ const world = createColliderWorld({
 for (const p of STATION_PARTS) {
   if (p.s === 'tube') world.addTube(p.axis, p.u, p.v, p.from, p.to, p.rIn, p.rOut, p.kind);
   else world.addBox(p.min, p.max, p.kind);
+}
+
+// The rocks go in BEFORE the build, so the spawn filter below sees them and no
+// spawn can ever land inside one.
+for (const p of ASTEROID_PARTS) {
+  if (p.s === 'tube') world.addTube(p.axis, p.u, p.v, p.from, p.to, p.rIn, p.rOut, p.kind);
+  else world.addSphere(p.x, p.y, p.z, p.r, p.kind);
 }
 
 world.build();

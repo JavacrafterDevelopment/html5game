@@ -112,6 +112,21 @@ export class LocalPlayer {
     this.recoilTargetYaw += horizontal;
   }
 
+  /**
+   * Recoil as actual momentum, down the barrel and backwards.
+   *
+   * Only in flight. On the ground the recoil of a rifle goes into the planet
+   * through your boots, and a player who slid backwards every time they fired
+   * would be wrong as well as miserable.
+   *
+   * @param {THREE.Vector3} dir where the round went
+   * @param {number} speed metres per second of shove
+   */
+  pushBack(dir, speed) {
+    if (!this.flying) return;
+    this.vel.addScaledVector(dir, -speed);
+  }
+
   look(dx, dy, sensScale = 1) {
     const s = this.sensitivity * sensScale;
     // Banked over, the yaw axis is no longer the one that runs across the screen.

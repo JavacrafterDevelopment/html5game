@@ -10,8 +10,11 @@
 
 import * as THREE from '../../core/three.js';
 import { createStation } from './StationMesh.js';
-import { createSky, createLighting, createInteriorLights } from './Sky.js';
+import { createAsteroids } from './Asteroids.js';
+import { createSky, createLighting, createInteriorLights, sunDirection } from './Sky.js';
+import { SunGlare } from './SunGlare.js';
 import { MAP_INFO, INTERIOR_PROBES } from '/shared/maps/iss/index.js';
+import { raycastWorld } from '/shared/maps/active.js';
 
 export class ISSMap {
   constructor(scene, options = {}) {
@@ -47,8 +50,21 @@ export class ISSMap {
     this.station = await step(0.42, 'Berthing the modules', () => createStation({ shadows }));
     this.scene.add(this.station);
 
+    this.rocks = await step(0.70, 'Scattering the debris field', () => createAsteroids({ shadows }));
+    this.scene.add(this.rocks);
+
     this.cabin = await step(0.86, 'Switching the cabin lights on', () => createInteriorLights(INTERIOR_PROBES));
     this.scene.add(this.cabin);
+
+    this.glare = await step(0.94, 'Unfiltering the sun', () =>
+      new SunGlare(sunDirection(this.env), this.env.sunColor));
+    this.scene.add(this.glare.mesh);
+    /**
+     * Screen-space, so it belongs to the eye and not to the optic. The scope's
+     * second pass renders the same scene through a 13 degree camera, where the sun
+     * is somewhere else entirely -- Game hands this list to Scope.render to hide.
+     */
+    this.overlays = [this.glare.mesh];
 
     onProgress(1, 'Ready');
     this.built = true;
@@ -62,6 +78,7 @@ export class ISSMap {
     this.sky.material.uniforms.uTime.value = this.time;
     this.sky.position.copy(camera.position);
     this.lighting.update(camera.position);
+    this.glare.update(dt, camera, raycastWorld);
   }
 
   /** Nothing out here hears a thing. */
@@ -69,7 +86,12 @@ export class ISSMap {
 
   dispose() {
     if (!this.built) return;
-    this.scene.remove(this.sky, this.lighting.group, this.station, this.cabin);
+    this.scene.remove(this.sky, this.lighting.group, this.station, this.cabin, this.rocks, this.glare.mesh);
+    this.rocks.traverse((o) => { if (o.isMesh) o.geometry?.dispose(); });
+    this.rocks.userData.material?.map?.dispose();
+    this.rocks.userData.material?.dispose();
+    this.glare.dispose();
+    this.overlays = null;
     this.station.traverse((o) => {
       if (o.isMesh) o.geometry?.dispose();
     });
