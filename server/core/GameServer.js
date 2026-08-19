@@ -374,16 +374,68 @@ export class GameServer {
 
     player.consumeShot(weaponId, now);
 
+    const pellets = this.readPellets(msg, weapon, dx, dy, dz);
+
     // Everybody except the shooter gets the report, so they can hear the crack
     // and see the muzzle flash. The shooter renders their own shot locally.
-    this.broadcast(S.SHOT_FIRED, {
+    const report = {
       id: player.id,
       o: [r2(ox), r2(oy), r2(oz)],
       d: [r3(dx), r3(dy), r3(dz)],
       wp: weaponId
-    }, player.id);
+    };
+    if (pellets) {
+      report.p = new Array(pellets.length * 3);
+      for (let i = 0; i < pellets.length; i++) {
+        report.p[i * 3] = r3(pellets[i][0]);
+        report.p[i * 3 + 1] = r3(pellets[i][1]);
+        report.p[i * 3 + 2] = r3(pellets[i][2]);
+      }
+    }
+    this.broadcast(S.SHOT_FIRED, report, player.id);
 
-    this.resolveShot(player, weapon, ox, oy, oz, dx, dy, dz, now);
+    if (pellets) {
+      // Every pellet is a real trace against real rewound hitboxes. applyDamage
+      // refuses to touch a body that is already dead, so a shell that kills on its
+      // fourth pellet does not go on to kill them another fourteen times.
+      for (const p of pellets) {
+        this.resolveShot(player, weapon, ox, oy, oz, p[0], p[1], p[2], now);
+      }
+    } else {
+      this.resolveShot(player, weapon, ox, oy, oz, dx, dy, dz, now);
+    }
+  }
+
+  /**
+   * Validate and unpack a shell's pellet directions.
+   *
+   * The client sends them because it is the client that knows where its own
+   * pattern went, exactly as it already reports its own aim. What the server will
+   * not accept is the count being wrong or a pellet pointing somewhere a pellet
+   * could not have gone: without the cone check, one shell could be claimed as
+   * eighteen rounds fired in eighteen directions at once.
+   *
+   * @returns {number[][] | null} unit directions, or null for a single-round weapon
+   */
+  readPellets(msg, weapon, dx, dy, dz) {
+    const count = weapon.pellets | 0;
+    if (count < 2) return null;
+
+    const raw = msg.p;
+    if (!Array.isArray(raw) || raw.length !== count * 3) return null;
+
+    const cone = Math.cos(weapon.feel.pelletCone ?? 0.2);
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      let px = raw[i * 3], py = raw[i * 3 + 1], pz = raw[i * 3 + 2];
+      if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
+      const len = Math.hypot(px, py, pz);
+      if (len < 1e-5) continue;
+      px /= len; py /= len; pz /= len;
+      if (px * dx + py * dy + pz * dz < cone) continue;   // not off this barrel
+      out.push([px, py, pz]);
+    }
+    return out.length ? out : null;
   }
 
   /**

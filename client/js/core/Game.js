@@ -457,37 +457,34 @@ export class Game {
   _onLocalFire(shot) {
     const w = getWeapon(shot.weaponId);
 
-    this.net.send(C.FIRE, {
+    const pellets = shot.pellets || [{ dir: shot.dir, hit: shot.hit }];
+    const msg = {
       wp: shot.weaponId,
       o: [round3(shot.origin[0]), round3(shot.origin[1]), round3(shot.origin[2])],
       d: [round4(shot.dir[0]), round4(shot.dir[1]), round4(shot.dir[2])],
       seq: this.inputSeq
-    });
+    };
+    // A shell's worth of pellets rides as one flat array. The server traces every
+    // one of them; sending only the centre line would make seventeen of the
+    // eighteen purely decorative.
+    if (pellets.length > 1) {
+      const flat = new Array(pellets.length * 3);
+      for (let i = 0; i < pellets.length; i++) {
+        flat[i * 3] = round4(pellets[i].dir[0]);
+        flat[i * 3 + 1] = round4(pellets[i].dir[1]);
+        flat[i * 3 + 2] = round4(pellets[i].dir[2]);
+      }
+      msg.p = flat;
+    }
+    this.net.send(C.FIRE, msg);
 
     this.audio.gunshot(w.audio, null);
     this.map.onGunshot?.(shot.origin);
 
-    // muzzle flash + small yellow bullet + world impact on arrival
+    // muzzle flash + a small yellow round per pellet + world impact on arrival
     const muzzle = shot.muzzle;
-    this.effects.muzzleFlash(
-      muzzle, w.id === 'm700' ? 1.5 : w.id === 'glock17' ? 0.8 : 1.15, this.camera, shot.dir);
-
-    const end = shot.hit
-      ? shot.hit.point
-      : [
-        shot.origin[0] + shot.dir[0] * 280,
-        shot.origin[1] + shot.dir[1] * 280,
-        shot.origin[2] + shot.dir[2] * 280
-      ];
-
-    const bulletSpeed = w.id === 'm700' ? 620 : w.id === 'glock17' ? 380 : 490;
-    this.effects.shootBullet(muzzle, end, {
-      speed: bulletSpeed,
-      hit: shot.hit,
-      onImpact: (hit) => {
-        if (hit) this.effects.impact(hit.point, hit.normal, hit.kind);
-      }
-    });
+    this.effects.muzzleFlash(muzzle, w.feel.flashScale ?? 1.15, this.camera, shot.dir);
+    this._drawRounds(w, muzzle, shot.origin, pellets);
 
     if (w.feel.shellEject) {
       this._v1.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
@@ -521,20 +518,24 @@ export class Game {
     const muzzlePos = rp ? rp.muzzleWorldPosition(this._v1).toArray() : origin;
     this.audio.gunshot(w.audio, muzzlePos);
     this.map.onGunshot?.(muzzlePos);
-    this.effects.muzzleFlash(muzzlePos, w.id === 'm700' ? 1.4 : 1.05, this.camera, dir);
+    // Remote flashes are drawn a shade smaller: yours is 30 cm from the lens and
+    // theirs is across the room, and matching them makes theirs read as huge.
+    this.effects.muzzleFlash(muzzlePos, (w.feel.flashScale ?? 1.15) * 0.9, this.camera, dir);
 
-    const hit = raycastWorld(origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], WORLD.MAX_BULLET_RANGE);
-    const end = hit ? hit.point : [
-      origin[0] + dir[0] * 280, origin[1] + dir[1] * 280, origin[2] + dir[2] * 280
-    ];
-    const bulletSpeed = w.id === 'm700' ? 620 : w.id === 'glock17' ? 380 : 490;
-    this.effects.shootBullet(muzzlePos, end, {
-      speed: bulletSpeed,
-      hit: hit,
-      onImpact: (h) => {
-        if (h) this.effects.impact(h.point, h.normal, h.kind);
+    // Somebody else's shell arrives as a flat pellet array, same as ours goes out.
+    const pellets = [];
+    if (Array.isArray(msg.p) && msg.p.length >= 6) {
+      for (let i = 0; i + 2 < msg.p.length; i += 3) {
+        pellets.push({ dir: [msg.p[i], msg.p[i + 1], msg.p[i + 2]], hit: null });
       }
-    });
+    } else {
+      pellets.push({ dir, hit: null });
+    }
+    for (const p of pellets) {
+      p.hit = raycastWorld(origin[0], origin[1], origin[2], p.dir[0], p.dir[1], p.dir[2], WORLD.MAX_BULLET_RANGE);
+    }
+    this._drawRounds(w, muzzlePos, origin, pellets);
+    const hit = pellets[0].hit;
 
     // Supersonic crack: how close did that round pass to my head?
     const cam = this.camera.position;
@@ -549,6 +550,32 @@ export class Game {
         const pz = origin[2] + dir[2] * along;
         this.audio.bulletWhiz([px, py, pz], 0.35 + closeness * 0.75);
       }
+    }
+  }
+
+  /**
+   * Draw the rounds from one trigger pull: one for a rifle, eighteen for a shell.
+   *
+   * Pellets are drawn smaller and dimmer than a rifle round. Eighteen full-size
+   * tracers out of one barrel does not read as buckshot, it reads as a bug.
+   */
+  _drawRounds(w, muzzle, origin, pellets) {
+    const many = pellets.length > 1;
+    const speed = w.feel.bulletSpeed ?? 490;
+    for (const p of pellets) {
+      const end = p.hit ? p.hit.point : [
+        origin[0] + p.dir[0] * 280,
+        origin[1] + p.dir[1] * 280,
+        origin[2] + p.dir[2] * 280
+      ];
+      this.effects.shootBullet(muzzle, end, {
+        speed,
+        hit: p.hit,
+        scale: many ? 0.55 : 1,
+        onImpact: (hit) => {
+          if (hit) this.effects.impact(hit.point, hit.normal, hit.kind);
+        }
+      });
     }
   }
 

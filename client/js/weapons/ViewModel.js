@@ -138,6 +138,7 @@ export class ViewModel {
     }
     if (this.boltT > 0 && this.boltDuration > 0) {
       this.boltT = Math.max(0, this.boltT - dt / this.boltDuration);
+      if (this.boltT === 0) this.model.cycle?.end();
     }
 
     this.kick = damp(this.kick, 0, 19, dt);
@@ -217,14 +218,23 @@ export class ViewModel {
       }
     }
 
-    // bolt cycle (M700): hand comes off the grip, rifle rolls
+    // bolt cycle: hand comes off the grip and the weapon rolls. A model that owns
+    // its own action -- the MP-133 pump -- steers this through the pose instead.
     if (this.boltT > 0) {
       const t = 1 - this.boltT;
-      const arc = Math.sin(t * Math.PI);
-      rz += arc * 0.22;
-      rx += arc * 0.10;
-      this._targetPos.y -= arc * 0.03;
-      this._targetPos.z += arc * 0.02;
+      const cycle = this.model.cycle;
+      if (cycle) {
+        const pose = this._pose;
+        pose.rot.x = rx; pose.rot.y = ry; pose.rot.z = rz;
+        cycle.update(t, pose);
+        rx = pose.rot.x; ry = pose.rot.y; rz = pose.rot.z;
+      } else {
+        const arc = Math.sin(t * Math.PI);
+        rz += arc * 0.22;
+        rx += arc * 0.10;
+        this._targetPos.y -= arc * 0.03;
+        this._targetPos.z += arc * 0.02;
+      }
     }
 
     // recoil

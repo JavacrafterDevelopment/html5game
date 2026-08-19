@@ -10,7 +10,9 @@ import { WEAPONS, PRIMARY_CHOICES } from '/shared/weapons.js';
 function statBars(w) {
   const rpmScore = w.boltActionMs ? 0.12 : Math.min(1, w.rpm / 900);
   return [
-    ['DMG', Math.min(1, w.damage / 150)],
+    // Payload, not per-projectile: the shotgun does 10 a pellet and eighteen of
+    // them, and a bar reading 7% next to an assault rifle would be a lie.
+    ['DMG', Math.min(1, (w.damage * (w.pellets || 1)) / 150)],
     ['RATE', rpmScore],
     ['RANGE', Math.min(1, w.range.end / 400)],
     ['MOBIL', Math.min(1, (w.feel.moveMult - 0.8) / 0.25)]

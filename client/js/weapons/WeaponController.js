@@ -18,6 +18,22 @@ import { clamp, damp } from '/shared/math/num.js';
 
 const LEFT = 0, RIGHT = 2;
 
+/**
+ * Nudge a unit direction to a uniformly random point inside a cone of the given
+ * half-angle, using the camera basis so the disc is round on screen.
+ *
+ * sqrt() on the radius is what makes it uniform over the DISC. Without it the
+ * pellets bunch in the middle and a shotgun pattern comes out looking like a
+ * slug with a halo.
+ */
+function scatter(dir, right, up, halfAngle) {
+  const a = Math.random() * Math.PI * 2;
+  const r = Math.sqrt(Math.random()) * halfAngle;
+  dir.addScaledVector(right, Math.cos(a) * r);
+  dir.addScaledVector(up, Math.sin(a) * r);
+  dir.normalize();
+}
+
 export class WeaponController {
   constructor(player, viewModel, opts = {}) {
     this.player = player;
@@ -54,6 +70,7 @@ export class WeaponController {
     this._dir = new THREE.Vector3();
     this._right = new THREE.Vector3();
     this._up = new THREE.Vector3();
+    this._pellet = new THREE.Vector3();
     this._origin = new THREE.Vector3();
   }
 
@@ -214,17 +231,15 @@ export class WeaponController {
 
     // ---------------------------------------------------------- direction
     camera.getWorldDirection(this._dir);
-    const spread = this.computeSpread();
-    if (spread > 0) {
-      // uniform disc inside the cone, then rotate into the camera basis
-      this._right.set(1, 0, 0).applyQuaternion(camera.quaternion);
-      this._up.set(0, 1, 0).applyQuaternion(camera.quaternion);
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.sqrt(Math.random()) * spread;
-      this._dir.addScaledVector(this._right, Math.cos(a) * r);
-      this._dir.addScaledVector(this._up, Math.sin(a) * r);
-      this._dir.normalize();
-    }
+    this._right.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    this._up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+
+    // The aim cone is YOUR error, so it moves the whole pattern together. The
+    // pellet cone below then scatters within it. Applying the aim wobble per
+    // pellet instead would quietly cancel it out: eighteen independent errors
+    // average to the middle, and a shotgun that cannot miss is not a weapon.
+    const aim = this.computeSpread();
+    if (aim > 0) scatter(this._dir, this._right, this._up, aim);
 
     camera.getWorldPosition(this._origin);
     const origin = [this._origin.x, this._origin.y, this._origin.z];
@@ -232,7 +247,22 @@ export class WeaponController {
 
     // ---------------------------------------------------------- world trace
     // Effects only. Players are deliberately NOT tested here.
-    const hit = raycastWorld(origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], WORLD.MAX_BULLET_RANGE);
+    //
+    // Everything fires a list of pellets; a rifle's list is one long, so there is
+    // no second code path anywhere downstream for the shotgun to fall out of.
+    const count = w.pellets || 1;
+    const pellet = this.pelletSpread();
+    const pellets = [];
+    for (let i = 0; i < count; i++) {
+      this._pellet.copy(this._dir);
+      if (pellet > 0) scatter(this._pellet, this._right, this._up, pellet);
+      const pd = [this._pellet.x, this._pellet.y, this._pellet.z];
+      pellets.push({
+        dir: pd,
+        hit: raycastWorld(origin[0], origin[1], origin[2], pd[0], pd[1], pd[2], WORLD.MAX_BULLET_RANGE)
+      });
+    }
+    const hit = pellets[0].hit;
 
     // ---------------------------------------------------------- feedback
     this.spread = Math.min(this.spread + feel.spreadPerShot, feel.spreadMax);
@@ -254,11 +284,31 @@ export class WeaponController {
       origin,
       dir,
       hit,
+      pellets,
       muzzle: this.view.muzzleWorldPosition().toArray(),
       eject: this.view.ejectWorldPosition().toArray(),
       recoilRecover: feel.recoilRecover,
       ammo: this.currentAmmo.mag
     });
+  }
+
+  /** Half-angle of the pellet cone, or 0 for anything that fires one projectile. */
+  pelletSpread() {
+    const feel = this.weapon.feel;
+    if (!feel.pelletSpread) return 0;
+    const ads = feel.pelletSpreadAds ?? feel.pelletSpread;
+    return feel.pelletSpread + (ads - feel.pelletSpread) * this.view.adsBlend;
+  }
+
+  /**
+   * How wide the shot actually lands, aim error and pattern together.
+   *
+   * This is what the crosshair is drawn from. computeSpread() alone would draw a
+   * shotgun a tighter reticle than an assault rifle, which is true of its aim and
+   * a lie about where the shot goes.
+   */
+  patternSpread() {
+    return this.computeSpread() + this.pelletSpread();
   }
 
   /** FOV for the main camera this frame. */
@@ -282,9 +332,9 @@ export class WeaponController {
     return 1 - (1 - fovScale) * 0.75;
   }
 
-  /** Crosshair gap in pixels, driven by real spread. */
+  /** Crosshair gap in pixels, driven by where the shot really lands. */
   crosshairSpread(viewportHeight, fov) {
-    const spread = this.computeSpread();
+    const spread = this.patternSpread();
     const fovRad = fov * Math.PI / 180;
     return clamp((spread / Math.tan(fovRad / 2)) * (viewportHeight / 2) * 0.5, 3, 90);
   }

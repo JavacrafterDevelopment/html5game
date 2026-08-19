@@ -46,7 +46,9 @@ export const WEAPONS = {
       recoilRecover: 7.6,
       kickBack: 0.036,
       shakeAmount: 0.9,
-      shellEject: true
+      shellEject: true,
+      flashScale: 1.15,
+      bulletSpeed: 490
     },
     audio: { pitch: 0.82, body: 118, crack: 0.95, tail: 0.55 },
     // --- view model placement (client) ---
@@ -93,7 +95,9 @@ export const WEAPONS = {
       recoilRecover: 9.2,
       kickBack: 0.028,
       shakeAmount: 0.72,
-      shellEject: true
+      shellEject: true,
+      flashScale: 1.15,
+      bulletSpeed: 490
     },
     audio: { pitch: 1.04, body: 150, crack: 1.0, tail: 0.45 },
     // ads[2] is the eye-to-sight distance. The M4 model is a full-length carbine
@@ -102,6 +106,82 @@ export const WEAPONS = {
     view: {
       hip: [0.23, -0.20, -0.30],
       ads: [0, -0.058, -0.235],
+      hipRot: [0.02, -0.06, 0],
+      scale: 1.0
+    }
+  },
+
+  mp133: {
+    id: 'mp133',
+    name: 'MP-133',
+    fullName: 'Baikal MP-133 12ga',
+    class: 'Shotgun',
+    slot: SLOTS.PRIMARY,
+    // --- gameplay (server-authoritative) ---
+    /**
+     * PER PELLET, and there are eighteen of them. Ten on target is exactly lethal,
+     * which is the number worth holding in your head: a face-full at three metres
+     * is not survivable and half a pattern at fifteen is not fatal.
+     *
+     * Every pellet is traced separately, on the client for effects and on the
+     * server for damage. See GameServer.handleFire.
+     */
+    damage: 10,
+    pellets: 18,
+    headMult: 1.5,          // a pellet to the head is 15, not an instant kill
+    legMult: 0.85,
+    rpm: 75,
+    auto: false,
+    magSize: 6,
+    reserveMags: 6,
+    reloadMs: 2900,
+    reloadEmptyMs: 3800,
+    // Falls off hard and early. A shotgun that reaches is not a shotgun.
+    range: { start: 7, end: 26, minMult: 0.28 },
+    muzzleVelocity: 400,
+    boltActionMs: 800,      // the pump: forced re-chamber after every shell
+    feel: {
+      adsMs: 230,
+      adsFov: 62,
+      moveMult: 0.95,
+      // Aim wobble is deliberately small. On a shotgun it is the PATTERN that
+      // decides whether you hit, and stacking a wide aim cone on top of a wide
+      // pattern makes the weapon feel random rather than short-ranged.
+      spreadHip: 0.012,
+      spreadAds: 0.004,
+      spreadMoveAdd: 0.020,
+      spreadAirAdd: 0.032,
+      spreadPerShot: 0.008,
+      spreadMax: 0.05,
+      spreadRecover: 0.14,
+      /** Half-angle of the pellet cone: 4 cm per metre, so 0.8 m across at 10 m. */
+      pelletSpread: 0.040,
+      pelletSpreadAds: 0.029,
+      /**
+       * The widest the server will accept a pellet being off the reported centre
+       * line. Generous next to the pattern itself, and the entire point is that it
+       * is finite -- without it a client could claim eighteen rounds in eighteen
+       * directions and call it one shell.
+       */
+      pelletCone: 0.16,
+      recoilV: 0.030,
+      recoilH: 0.0072,
+      recoilRecover: 5.2,
+      kickBack: 0.072,
+      shakeAmount: 1.7,
+      shellEject: false,    // the pump throws the hull, not the trigger
+      flashScale: 1.75,
+      bulletSpeed: 400
+    },
+    audio: { pitch: 0.55, body: 78, crack: 1.15, tail: 0.85 },
+    /**
+     * ads[2] is the eye-to-sight distance, and the sight reference sits at the rear
+     * of the receiver (see WeaponModels). Ten centimetres behind that is a cheek
+     * weld; thirty puts your eye a third of a metre inside the buttstock.
+     */
+    view: {
+      hip: [0.24, -0.22, -0.34],
+      ads: [0, -0.075, -0.22],
       hipRot: [0.02, -0.06, 0],
       scale: 1.0
     }
@@ -140,7 +220,9 @@ export const WEAPONS = {
       recoilRecover: 10.8,
       kickBack: 0.022,
       shakeAmount: 0.55,
-      shellEject: true
+      shellEject: true,
+      flashScale: 0.80,
+      bulletSpeed: 380
     },
     audio: { pitch: 1.25, body: 205, crack: 0.7, tail: 0.3 },
     view: {
@@ -185,7 +267,9 @@ export const WEAPONS = {
       recoilRecover: 4.6,
       kickBack: 0.085,
       shakeAmount: 2.1,
-      shellEject: false     // ejects on bolt cycle instead
+      shellEject: false,    // ejects on bolt cycle instead
+      flashScale: 1.50,
+      bulletSpeed: 620
     },
     audio: { pitch: 0.62, body: 90, crack: 1.35, tail: 1.0 },
     scope: {
@@ -205,7 +289,7 @@ export const WEAPONS = {
 };
 
 /** Primaries the player may choose from in the loadout screen. */
-export const PRIMARY_CHOICES = ['ak47', 'm4a1', 'm700'];
+export const PRIMARY_CHOICES = ['ak47', 'm4a1', 'mp133', 'm700'];
 /** Everyone carries the Glock. */
 export const DEFAULT_SECONDARY = 'glock17';
 

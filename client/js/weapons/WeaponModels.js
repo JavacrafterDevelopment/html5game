@@ -22,6 +22,7 @@ try {
 }
 
 let cachedM4 = null;
+let cachedMP133 = null;
 
 /** Try each candidate URL in turn; returns null if none of them load. */
 async function loadFirst(urls, label) {
@@ -44,6 +45,10 @@ export async function preloadWeaponModels() {
   if (!cachedM4) {
     jobs.push(loadFirst(['/assets/m4.glb', '/client/assets/m4.glb'], 'm4.glb')
       .then((m) => { if (m) cachedM4 = m; }));
+  }
+  if (!cachedMP133) {
+    jobs.push(loadFirst(['/assets/MP133.glb', '/client/assets/MP133.glb'], 'MP133.glb')
+      .then((m) => { if (m) cachedMP133 = m; }));
   }
   await Promise.all(jobs);
 }
@@ -570,10 +575,156 @@ function buildM700() {
   });
 }
 
+// ------------------------------------------------------------------ MP-133
+/**
+ * The pump.
+ *
+ * MP133.glb ships a PUMP_Group holding the forend, both action bars, the bolt and
+ * the carrier -- everything that moves when you work the action -- so cycling it is
+ * a matter of sliding one node rather than picking parts out by hand. The stroke is
+ * driven from the same bolt timer the M700 uses, so the weapon cannot fire again
+ * until the shell is chambered, which is the whole feel of a pump gun.
+ */
+function makeMP133Cycle(pump, hull) {
+  const STROKE = 0.088;      // how far the forend travels, metres
+  return {
+    /**
+     * @param {number} t 0 -> 1 across the cycle
+     * @param {object} pose the viewmodel pose, which the stroke may shove around
+     */
+    update(t, pose) {
+      // Back fast, forward a little slower, with a hard stop at each end: a pump
+      // is two sharp events, not a smooth sine.
+      const back = t < 0.42 ? t / 0.42 : 1 - (t - 0.42) / 0.58;
+      const eased = back * back * (3 - 2 * back);
+      pump.position.z = eased * STROKE;
+
+      // The spent hull rides out of the ejection port on the back stroke. It
+      // starts AT the port rather than where the artist parked it, which is off to
+      // one side as a display position.
+      if (hull) {
+        const out = clamp((t - 0.16) / 0.28, 0, 1);
+        hull.visible = out > 0 && out < 1;
+        hull.position.set(0.022 + out * 0.26, out * 0.07 - out * out * 0.19, 0.080 + out * 0.05);
+        hull.rotation.set(0, 0, out * 7.5);
+      }
+
+      // The gun rocks as the shooter works it.
+      pose.rot.x += eased * 0.055;
+      pose.pos.z += eased * 0.022;
+      pose.pos.y -= eased * 0.012;
+    },
+
+    end() {
+      pump.position.z = 0;
+      if (hull) hull.visible = false;
+    }
+  };
+}
+
+/**
+ * Where the eye goes, and how far the gun has to be pitched to agree with it.
+ *
+ * A shotgun has no rear sight: you lay your cheek on the comb and look down the rib
+ * at the bead. This one has a very straight stock -- the comb tops out at y = 0.019
+ * and the rib runs at y = 0.025 -- so an eye placed honestly on the rib line sits
+ * six millimetres above the comb, and from there the comb hides the entire barrel.
+ * You end up aiming down the side of the buttstock.
+ *
+ * So the eye is lifted 50 mm clear of the comb and the whole gun is pitched
+ * nose-UP about that point by exactly the angle that brings the bead back onto the
+ * axis: 50 mm of drop over the 825 mm from the eye to the bead. Same trick the M4
+ * uses to line its irons up, in the opposite direction.
+ */
+const MP133_SIGHT = new THREE.Vector3(0, 0.075, 0.215);
+const MP133_TILT = Math.atan2(0.050, 0.825);
+
+function buildMP133() {
+  if (!cachedMP133) return buildMP133Procedural();
+
+  const group = new THREE.Group();
+  const tilt = new THREE.Group();
+  tilt.position.copy(MP133_SIGHT);
+  tilt.rotation.x = MP133_TILT;
+  group.add(tilt);
+  // The offset that undoes the pivot lives below it, where nothing animates it.
+  const rest = new THREE.Group();
+  rest.position.copy(MP133_SIGHT).negate();
+  tilt.add(rest);
+
+  const model = cachedMP133.clone(true);
+  rest.add(model);
+  group.traverse((o) => {
+    if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; }
+  });
+
+  const part = (name) => model.getObjectByName(name) || null;
+  const at = (name, fallback) => {
+    const node = part(name);
+    if (!node) return marker(rest, fallback[0], fallback[1], fallback[2]);
+    const p = new THREE.Vector3();
+    node.getWorldPosition(p);
+    rest.worldToLocal(p);
+    return marker(rest, p.x, p.y, p.z);
+  };
+
+  // The model carries named sockets for all of these, which is why none of them
+  // are hand-measured the way the AK's had to be.
+  const muzzle = at('SOCKET_Muzzle', [0, 0, -0.61]);
+  const eject = at('SOCKET_Eject', [0.022, 0, 0.08]);
+
+  const pump = part('PUMP_Group');
+  const hull = part('SM_MP133_Shell_Spent');
+  // Both shells ship parked out beside the receiver as display pieces. They are
+  // props for an animation, not part of the gun, so they stay hidden until the
+  // action throws one.
+  if (hull) hull.visible = false;
+  const live = part('SM_MP133_Shell');
+  if (live) live.visible = false;
+
+  return {
+    group,
+    muzzle,
+    eject,
+    cycle: pump ? makeMP133Cycle(pump, hull) : null,
+    shared: true,           // geometry belongs to the cache, never dispose it
+    // The pivot the gun is pitched about; see MP133_SIGHT.
+    sight: MP133_SIGHT.clone(),
+    id: 'mp133'
+  };
+}
+
+/** Fallback, for a copy of the game whose MP133.glb went missing. */
+function buildMP133Procedural() {
+  const b = new GunBuilder();
+  const m = b.mats;
+
+  b.tube(0.0115, 0.0115, 0.62, m.blued, 0, 0.014, -0.30);        // barrel
+  b.tube(0.0135, 0.0135, 0.52, m.blued, 0, -0.014, -0.25);       // magazine tube
+  b.box(0.004, 0.007, 0.60, m.blued, 0, 0.026, -0.30);           // ventilated rib
+  b.box(0.052, 0.072, 0.20, m.steel, 0, 0.0, 0.05);              // receiver
+  b.box(0.046, 0.046, 0.17, m.wood, 0, -0.014, -0.22);           // forend
+  b.box(0.044, 0.075, 0.30, m.wood, 0, -0.030, 0.29);            // stock
+  b.box(0.046, 0.085, 0.022, m.polymer, 0, -0.040, 0.445);       // butt pad
+  b.triggerGuard(m.steel, -0.012, 0.09, 0.024);
+  b.post(0.004, 0.004, 0.010, m.steel, 0, 0.032, -0.60);         // bead
+
+  const muzzle = marker(b.group, 0, 0.014, -0.61);
+  const eject = marker(b.group, 0.026, 0.0, 0.02);
+  // The fallback is drawn with a low comb, so its eye can sit on the bead line
+  // and no pitch correction is needed.
+  return b.finish({
+    muzzle, eject,
+    sight: new THREE.Vector3(0, 0.032, 0.215),
+    id: 'mp133'
+  });
+}
+
 // ------------------------------------------------------------------ registry
 const BUILDERS = {
   ak47: buildAK47,
   m4a1: buildM4A1,
+  mp133: buildMP133,
   glock17: buildGlock17,
   m700: buildM700
 };

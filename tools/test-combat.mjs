@@ -22,6 +22,7 @@ import { heightAt } from '../shared/maps/snowy_forest/terrain.js';
 import { isBlocked } from '../shared/maps/snowy_forest/collision.js';
 import { getActiveMapId } from '../shared/maps/active.js';
 import { CABIN } from '../shared/maps/snowy_forest/cabin.js';
+import { WEAPONS } from '../shared/weapons.js';
 
 let passed = 0;
 function ok(label) { passed++; console.log('  ok  ' + label); }
@@ -67,6 +68,42 @@ function shootAt(conn, shooter, target, aimY) {
   const len = Math.hypot(dx, dy, dz);
   dx /= len; dy /= len; dz /= len;
   conn.fire('message', encode(C.FIRE, { wp: shooter.weaponId, o: [ox, oy, oz], d: [dx, dy, dz] }));
+  return len;
+}
+
+/**
+ * Fire a shell: one centre line plus a cone of pellets around it.
+ *
+ * `spread` is deliberately a parameter rather than read from the weapon, because
+ * the tests below need to send patterns the weapon would never produce -- that is
+ * the only way to check what the server refuses.
+ */
+function shootShell(conn, shooter, target, aimY, count, spread) {
+  const ox = shooter.pos[0], oy = shooter.pos[1] + shooter.eyeHeight, oz = shooter.pos[2];
+  const tx = target.pos[0], ty = target.pos[1] + aimY, tz = target.pos[2];
+  let dx = tx - ox, dy = ty - oy, dz = tz - oz;
+  const len = Math.hypot(dx, dy, dz);
+  dx /= len; dy /= len; dz /= len;
+
+  // any two axes perpendicular to the shot
+  let ux = -dy, uy = dx, uz = 0;
+  if (Math.hypot(ux, uy, uz) < 1e-4) { ux = 1; uy = 0; uz = 0; }
+  const ul = Math.hypot(ux, uy, uz); ux /= ul; uy /= ul; uz /= ul;
+  const vx = dy * uz - dz * uy, vy = dz * ux - dx * uz, vz = dx * uy - dy * ux;
+
+  const p = [];
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
+    const r = spread * (i === 0 ? 0 : 0.55 + 0.45 * ((i % 3) / 2));
+    let px = dx + (ux * Math.cos(a) + vx * Math.sin(a)) * r;
+    let py = dy + (uy * Math.cos(a) + vy * Math.sin(a)) * r;
+    let pz = dz + (uz * Math.cos(a) + vz * Math.sin(a)) * r;
+    const pl = Math.hypot(px, py, pz);
+    p.push(px / pl, py / pl, pz / pl);
+  }
+  conn.fire('message', encode(C.FIRE, {
+    wp: shooter.weaponId, o: [ox, oy, oz], d: [dx, dy, dz], p
+  }));
   return len;
 }
 
@@ -208,6 +245,66 @@ function run() {
   shootAt(connA, alpha, bravo, sillY);
   assert.ok(bravo.hp < PLAYER.MAX_HP, 'a round through the window opening should connect');
   ok('window opening is genuinely shootable');
+
+  // ---------------------------------------------- 8b: the shotgun fires a shell
+  const W = WEAPONS.mp133;
+  assert.strictEqual(W.pellets, 18, 'the MP-133 should throw 18 pellets');
+
+  const [sgA, sgB] = findClearPair(6);
+  // pendingPrimary, not primary: spawn() re-applies the pending loadout, so setting
+  // primary alone is silently undone and the test quietly fires an M4 instead.
+  charlie.pendingPrimary = 'mp133';
+  charlie.spawn({ x: sgA[0], y: heightAt(sgA[0], sgA[1]), z: sgA[1], yaw: 0 });
+  assert.strictEqual(charlie.weaponId, 'mp133', 'the shooter should actually be holding the shotgun');
+  place(charlie, sgA[0], sgA[1]);
+  bravo.spawn({ x: sgB[0], y: heightAt(sgB[0], sgB[1]), z: sgB[1], yaw: 0 });
+  place(bravo, sgB[0], sgB[1]);
+  // Deliberately over-healthy, so the total can be MEASURED. At full health the
+  // shell kills and the count is clipped at 100, which proves it is lethal and
+  // says nothing about how many pellets actually connected.
+  bravo.hp = 400;
+  charlie.lastShotAt = 0;
+  charlie.shotsThisSecond = 0;
+
+  shootShell(connC, charlie, bravo, 1.1, W.pellets, W.feel.pelletSpread);
+  const shellDamage = 400 - bravo.hp;
+  const connected = Math.round(shellDamage / W.damage);
+  assert.ok(connected >= 12,
+    `only ${connected} of ${W.pellets} pellets connected on a torso at 6 m`);
+  ok(`shotgun resolves every pellet (${connected}/${W.pellets} on a torso at 6 m, ${shellDamage.toFixed(0)} damage)`);
+  assert.ok(shellDamage > PLAYER.MAX_HP, 'a shell to the chest at 6 m has to be lethal');
+  ok('a shell at close range is lethal in one trigger pull');
+
+  // ...and it must still be the hardcore protocol: the shooter learns nothing.
+  const told = connC.of(S.YOU_DIED).length + connC.sent.filter((m) => /hit|kill/i.test(m.m)).length;
+  assert.strictEqual(told, 0, 'the shooter must not be told anything about a shotgun hit');
+  ok('a shell tells the shooter no more than a rifle round does');
+
+  // A client claiming eighteen rounds in eighteen directions gets none of them.
+  bravo.alive = true;
+  bravo.hp = PLAYER.MAX_HP;
+  charlie.lastShotAt = 0;
+  charlie.shotsThisSecond = 0;
+  charlie.ammo.mp133.mag = 6;
+  shootShell(connC, charlie, bravo, 1.1, W.pellets, 1.4);   // 80 degrees off axis
+  // The one pellet this pattern puts down the centre line is legitimate and lands.
+  // The seventeen wild ones are what must not.
+  const wild = PLAYER.MAX_HP - bravo.hp;
+  assert.ok(wild <= W.damage * 1.5,
+    `${Math.round(wild / W.damage)} of 18 wildly-aimed pellets resolved; at most one should have`);
+  ok('server rejects pellets that could not have come off that barrel');
+
+  // The wrong NUMBER of pellets is a malformed shell, and falls back to one round.
+  bravo.alive = true;
+  bravo.hp = PLAYER.MAX_HP;
+  charlie.lastShotAt = 0;
+  charlie.shotsThisSecond = 0;
+  charlie.ammo.mp133.mag = 6;
+  shootShell(connC, charlie, bravo, 1.1, 60, W.feel.pelletSpread);
+  const miscount = PLAYER.MAX_HP - bravo.hp;
+  assert.ok(miscount > 0 && miscount <= W.damage * 1.6,
+    `a 60-pellet shell did ${miscount.toFixed(0)}; it should resolve as a single round`);
+  ok('a shell with the wrong pellet count resolves as one round, not sixty');
 
   // ------------------------------------------------------- 9: fire rate cap
   bravo.spawn({ x: spotB[0], y: heightAt(spotB[0], spotB[1]), z: spotB[1], yaw: 0 });

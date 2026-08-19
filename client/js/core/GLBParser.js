@@ -48,7 +48,18 @@ export function parseGLB(arrayBuffer) {
     'Mat_M4_BoltChrome': { color: 0xb9bec6, roughness: 0.18, metalness: 0.95 },
     'Mat_M4_Polymer': { color: 0x23262a, roughness: 0.72, metalness: 0.04 },
     'Mat_M4_Receiver': { color: 0x33383e, roughness: 0.44, metalness: 0.28 },
-    'Mat_M4_Accent': { color: 0x3a3f45, roughness: 0.50, metalness: 0.62 }
+    'Mat_M4_Accent': { color: 0x3a3f45, roughness: 0.50, metalness: 0.62 },
+    // The MP-133 is held at moderate metalness on purpose. It is a PRIMARY, so it
+    // gets carried onto the ISS, and a physically metallic finish with no
+    // environment map to reflect renders as a black cut-out out there.
+    'MP133_BluedSteel': { color: 0x24272c, roughness: 0.38, metalness: 0.62 },
+    'MP133_BrightSteel': { color: 0xb6bbc1, roughness: 0.24, metalness: 0.66 },
+    'MP133_MattedSteel': { color: 0x2c2f34, roughness: 0.64, metalness: 0.45 },
+    'MP133_Wood': { color: 0x6d4526, roughness: 0.48, metalness: 0.02 },
+    'MP133_Rubber': { color: 0x212327, roughness: 0.93, metalness: 0.0 },
+    'MP133_SafetyRed': { color: 0xa32a22, roughness: 0.50, metalness: 0.05 },
+    'MP133_Brass': { color: 0xb28c3e, roughness: 0.30, metalness: 0.70 },
+    'MP133_HullRed': { color: 0x8f2119, roughness: 0.62, metalness: 0.04 }
   };
 
   const materials = (json.materials || []).map((m) => {

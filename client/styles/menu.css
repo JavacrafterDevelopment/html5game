@@ -95,7 +95,8 @@
 /* ------------------------------------------- weapon picker ---- */
 .weapon-picker {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* auto-fit rather than a fixed count: adding a weapon should not need a CSS edit */
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 8px;
 }
 

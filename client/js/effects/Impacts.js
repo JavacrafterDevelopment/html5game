@@ -607,7 +607,9 @@ export class Effects {
   constructor(scene) {
     this.scene = scene;
     this.debris = new DebrisSystem(900);
-    this.bullets = new BulletPool(48);
+    // Deep enough for a shotgun: eighteen pellets a shell, two shells in flight,
+    // and other people firing at the same time.
+    this.bullets = new BulletPool(120);
     this.tracers = new TracerPool(28);
     this.flashes = new FlashPool(6);
     this.shells = new ShellPool(24);
