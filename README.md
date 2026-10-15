@@ -61,3 +61,28 @@ The whole server moves together: everyone rebuilds and respawns.
 
 Full documentation — architecture, netcode, tuning, tests, how to add maps and
 weapons — is in **[project.md](project.md)**.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or https://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or https://opensource.org/licenses/MIT)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
+
+### Third-party components
+
+These bundled pieces aren't covered by the license above and keep their own:
+
+| Path | What | License |
+|---|---|---|
+| `runtime/node/` | Node.js | MIT, plus the licenses of what Node bundles ([runtime/node/LICENSE](runtime/node/LICENSE)) |
+| `client/vendor/three.module.js`, `client/vendor/GLTFLoader.js` | [three.js](https://github.com/mrdoob/three.js) | MIT |
+| `assets/*.glb`, `client/assets/*.glb` | Weapon models | Their own terms, from wherever they came from |
